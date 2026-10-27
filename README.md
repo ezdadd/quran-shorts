@@ -1,0 +1,112 @@
+# quran-shorts — ازْدَدْ · EZDADD
+
+مولّد فيديوهات Shorts قرآنية (9:16) تلقائيًا: مقطع طبيعة + آيات بالرسم العثماني متزامنة مع التلاوة + صوت طبيعة خفيف، من غير أي موسيقى.
+
+> الحالة: المرحلة 1 (القرآني) + المرحلة 2 (الدروس) + المرحلة 3 (النشر) جاهزين. التشغيل اليومي التلقائي (المرحلة 4) لسه.
+
+## التثبيت (Windows)
+
+```bash
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m playwright install chromium
+winget install Gyan.FFmpeg
+copy .env.example .env
+```
+
+بعدين حط `PEXELS_API_KEY` في `.env`:
+1. اعمل حساب على https://www.pexels.com وادخل على https://www.pexels.com/api/
+2. اضغط **Your API Key**، املا الفورم (اسم المشروع ووصف قصير)، والمفتاح بيطلع فورًا.
+3. الحدود: 200 طلب في الساعة و20,000 في الشهر (أكتر من كفاية).
+
+(اختياري) `PIXABAY_API_KEY` من https://pixabay.com/api/docs/ بعد تسجيل الدخول.
+
+## التشغيل
+
+```bash
+.venv\Scripts\python -m src.main --generate 3 --dry-run
+```
+
+الناتج في `output/YYYY-MM-DD/`: لكل فيديو ملف `mp4` وملف `json` فيه نص الآيات والمراجع والقارئ ومصدر المقطع والقالب والكابشن لكل منصة.
+
+خيارات مفيدة: `--seed 5` (نتيجة ثابتة) و`--category ocean` (تصنيف معيّن للاختبار) و`-v` (لوج مفصّل).
+
+## دقة النص القرآني
+
+- النص بيتجاب من **Quran.com API v4** (قائمة الكلمات بالرسم العثماني، ودي نفسها اللي عليها توقيت التلاوة كلمة كلمة).
+- كل آية بتتراجع حرف بحرف (بعد حذف التشكيل) على **alquran.cloud** (`quran-uthmani`). لو المصدرين اختلفوا، المقطع **بيترفض** وبيتسجل.
+- مفيش آية بتتكتب من الذاكرة. `data/passages.json` فيه المراجع بس، وتقدر تعدّله براحتك وبعدين تتحقق منه بـ:
+  `.venv\Scripts\python -m tools.make_passages --check`
+- المقاطع اللي بتبدأ من الآية 1 بتتستبعد، لأن ملف تلاوة الآية الأولى ممكن يكون فيه البسملة والنص ما فيهوش.
+- الكتابة بتترسم بـ Chromium (HarfBuzz)، وللفحص المرئي: `.venv\Scripts\python -m tools.visual_test` والصور بتطلع في `output/visual_test/`.
+
+## الصوت
+
+- التلاوة آية آية من **EveryAyah.com**: `Husary_128kbps` و`Minshawy_Murattal_128kbps`.
+- صوت الطبيعة من `assets/ambience/<ocean|rain|wind|storm|forest|birds|river>/` (ملفات CC0 بس، والمصدر يتكتب في `assets/ambience/SOURCES.txt`). مستواه أقل من التلاوة بـ 22–28 dB، والناتج النهائي حوالي **-14 LUFS**.
+
+## تعريف القناة
+
+`branding` في `config.yaml`: تعريف القناة الصغير تحت الفيديو (`ازْدَدْ · @EZDADD_`) ومكانه وحجمه.
+
+## سياسات المنصات
+
+- ابدأ بـ 2–3 فيديوهات في اليوم (`daily.quran_count`).
+- لو قارئ جاب Content ID claims، حطه في `excluded_reciters`. صوت الطبيعة في الخلفية **مش** بيمنع الـ claim.
+
+
+## لوحة التحكم
+
+دبل كليك على `panel.bat` (أو `.venv\Scripts\python -m src.panel`) وهتفتح على http://127.0.0.1:8765 — تشوف كل الفيديوهات، توافق/ترفض، تعدّل ترجمة الدروس، تولّد، وتجدول النشر. شغالة على جهازك بس.
+
+## المرحلة 2: الدروس
+
+- حط الدروس في `assets/lectures/samir_mostafa/` أو `assets/lectures/amgad_samir/`، أو حمّلها من اللوحة برابط (`tools/fetch_lecture.py`). إنت مسؤول عن إذن الاستخدام.
+- «تفريغ وتجهيز المقاطع» في اللوحة: تفريغ بـ faster-whisper (حوالي ١.٤ × طول الدرس على الـ CPU، وبيتحفظ) ← اختيار ٥ مقاطع ٣٠–٦٠ ث تبدأ وتخلص على جملة كاملة ← رندر في `output/review/`.
+- أي آية الشيخ بيقولها بتتعرف تلقائيًا وتتعرض بنص الـ API بالظبط؛ أي حديث بيتعلّم «محتاج مراجعة».
+- مفيش درس بيتنشر غير بعد «موافقة». الموافقة بترفع الفيديو على Cloudinary وتحطه في `queue/` على GitHub، والتشغيل اليومي بينشر منه `daily.queue_per_day` في اليوم.
+
+## المرحلة 3: النشر — الإعداد خطوة بخطوة
+
+| المنصة | الطريقة |
+|---|---|
+| يوتيوب شورتس، تيك توك، إنستجرام ريلز | Buffer API (الخطة المجانية: ٣ قنوات، ١٠ منشورات مجدولة لكل قناة) |
+| فيسبوك ريلز | Meta Graph API مباشرة (رفع مباشر + نشر مجدول) |
+| استضافة الفيديو لـ Buffer | Cloudinary مجاني — الملف بيتمسح بعد النشر |
+
+### ١) Buffer
+1. اعمل حساب على https://buffer.com (Free).
+2. اربط **YouTube** و**TikTok** و**Instagram** (لازم حساب إنستجرام Business أو Creator مربوط بصفحة فيسبوك عشان النشر التلقائي).
+3. **Settings → API → Create API key** وحطه في `.env` كـ `BUFFER_API_KEY`.
+
+### ٢) Cloudinary
+1. حساب مجاني على https://cloudinary.com.
+2. من **Dashboard / API Keys**: انسخ `Cloud name` و`API Key` و`API Secret` لـ `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET`.
+
+### ٣) فيسبوك
+1. لازم تكون أدمن على **صفحة** فيسبوك للقناة.
+2. https://developers.facebook.com → **My Apps → Create App** → اختار الاستخدام الخاص بإدارة الصفحات (Pages). سيب التطبيق في وضع **Development** (كفاية لصفحتك).
+3. من **App settings → Basic** انسخ `App ID` و`App Secret` لـ `FB_APP_ID` و`FB_APP_SECRET`.
+4. افتح **Graph API Explorer**، اختار تطبيقك، ضيف الصلاحيات: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`، واضغط **Generate Access Token** ووافق على صفحتك.
+5. انسخ التوكن القصير وشغّل:
+   ```bash
+   .venv\Scripts\python -m tools.fb_token PASTE_SHORT_TOKEN_HERE
+   ```
+   هيحوّله لتوكن صفحة طويل المدى ويحط `FB_PAGE_ID` و`FB_PAGE_TOKEN` في `.env` لوحده. البرنامج بيفحص صلاحيته كل يوم وينبهك قبل ما ينتهي بأسبوع.
+
+### ٤) التنبيهات (اختياري)
+- **Telegram**: اعمل بوت من @BotFather → `TELEGRAM_BOT_TOKEN`، وابعتله رسالة وهات الـ chat id → `TELEGRAM_CHAT_ID`.
+- أو **Discord**: Webhook URL من إعدادات القناة → `DISCORD_WEBHOOK_URL`.
+
+### ٥) افحص
+```bash
+.venv\Scripts\python -m src.publish.check
+```
+(أو زرار «فحص المفاتيح» في اللوحة). لازم كله ✓ قبل أول نشر حقيقي.
+
+### إزاي النشر بيشتغل
+- كل يوم: الفيديوهات القرآنية بتاعة اليوم + عناصر من طابور المراجعة (حسب `queue_per_day`) → كل فيديو ياخد وقت عشوائي جوه نوافذ `publishing.windows` بتوقيت القاهرة، والفرق بين أي فيديوهين ساعتين على الأقل، ومش على رأس الساعة.
+- نفس الفيديو على كل منصة بفرق عشوائي ٥–٤٠ دقيقة.
+- كل منصة بتتسجل في ملف الـ JSON بتاع الفيديو وفي `data/history.json` فور جدولتها — مفيش نشر مكرر حتى لو التشغيل وقع في النص.
+- يوتيوب: عام (public)، تصنيف Education، مش للأطفال. إنستجرام: Reel يظهر في الـ feed.
+- `--dry-run` بيعرض الجدول بس من غير أي نشر.

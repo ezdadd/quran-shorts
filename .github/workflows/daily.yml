@@ -1,0 +1,114 @@
+name: daily-shorts
+
+# Every day ~03:00 Cairo: generate today's Quran videos, schedule them (random times) on every
+# platform, publish one approved item from the review queue, clean up yesterday's hosted files,
+# and commit the state (history + records) back to the repo.
+on:
+  schedule:
+    # 01:07 UTC = 03:07 Cairo in winter (UTC+2) / 04:07 in summer (UTC+3). GitHub may start
+    # scheduled runs a little late; publishing windows start at 07:00, so that is harmless.
+    - cron: "7 1 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: generate only — publish nothing, commit nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-shorts
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      PYTHONIOENCODING: utf-8
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.browsers
+      PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      FB_APP_ID: ${{ secrets.FB_APP_ID }}
+      FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
+      FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+      FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: System packages (FFmpeg)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Python packages
+        run: pip install -r requirements.txt
+
+      - name: Cache headless browser
+        uses: actions/cache@v4
+        with:
+          path: .browsers
+          key: browsers-${{ runner.os }}-playwright-1.64.1
+
+      - name: Headless browser (Arabic text rendering)
+        run: python -m playwright install --with-deps chromium
+
+      - name: Restore Quran text / recitation cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/api
+            .cache/audio
+          key: quran-data-${{ github.run_id }}
+          restore-keys: quran-data-
+
+      - name: Generate today's videos
+        run: python -m src.main --top-up --no-publish ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Clean up yesterday + publish today (one retry)
+        if: ${{ !inputs.dry_run }}
+        run: |
+          python -m src.publish.runner --cleanup || true
+          python -m src.publish.runner || (sleep 120 && python -m src.publish.runner)
+
+      - name: Save state to the repo
+        if: ${{ !inputs.dry_run && always() }}
+        run: |
+          git config user.name "quran-shorts bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/history.json output queue || true
+          if ! git diff --cached --quiet; then
+            git commit -m "daily: $(TZ=Africa/Cairo date +%F)"
+            for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 10; done
+          fi
+
+      - name: Keep today's videos for 3 days (Actions → this run → Artifacts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: videos-${{ github.run_id }}
+          path: output/**/*.mp4
+          retention-days: 3
+          if-no-files-found: ignore
+
+      - name: Alert on failure
+        if: failure()
+        run: >
+          python -c "from src.util import load_config; load_config();
+          from src.publish.notify import send;
+          send('GitHub Actions daily run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}')"

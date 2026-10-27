@@ -1,0 +1,8 @@
+# local machine only: lectures (whisper), control panel, lecture download, face tracking
+-r requirements.txt
+ctranslate2==4.8.4
+faster-whisper==1.2.1
+Flask==3.1.3
+opencv-python-headless==5.0.0.93
+psutil==7.2.2
+yt-dlp==2026.10.26

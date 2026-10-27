@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ازْدَدْ · لوحة التحكم</title>
+<style>
+@font-face{font-family:"Naskh";src:url("/fonts/NotoNaskhArabic[wght].ttf");font-weight:100 900}
+@font-face{font-family:"Quran";src:url("/fonts/ScheherazadeNew-Regular.ttf")}
+:root{
+  --bg:#0f1214;--panel:#161b1f;--panel2:#1c2328;--line:#2a333a;--text:#e9ecee;--muted:#93a0a8;
+  --gold:#e8c56a;--gold-soft:rgba(232,197,106,.14);--ok:#5cc79a;--ok-soft:rgba(92,199,154,.14);
+  --warn:#f0a35b;--warn-soft:rgba(240,163,91,.14);--bad:#ef6f6f;--bad-soft:rgba(239,111,111,.14);
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:"Naskh",system-ui,sans-serif;font-size:15px}
+button,input,select,textarea{font:inherit;color:inherit}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:800;font-size:20px;color:var(--gold);letter-spacing:.5px}
+.brand small{color:var(--muted);font-weight:500;font-size:13px;margin-inline-start:8px}
+nav{display:flex;gap:4px;margin-inline-start:12px}
+nav button{background:none;border:0;padding:8px 14px;border-radius:10px;color:var(--muted);cursor:pointer}
+nav button.on{background:var(--panel2);color:var(--text)}
+.job-pill{margin-inline-start:auto;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--panel2);color:var(--muted);font-size:13px;cursor:pointer}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.run{background:var(--gold);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.3}}
+main{display:grid;grid-template-columns:360px 1fr;height:calc(100% - 59px)}
+aside{border-inline-end:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.filters{display:flex;flex-wrap:wrap;gap:6px;padding:12px}
+.chip{border:1px solid var(--line);background:none;border-radius:999px;padding:4px 12px;cursor:pointer;color:var(--muted);font-size:13px}
+.chip.on{border-color:var(--gold);color:var(--gold);background:var(--gold-soft)}
+.chip b{font-weight:700;margin-inline-start:4px}
+.list{overflow:auto;padding:0 8px 12px;flex:1}
+.item{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:10px 12px;border-radius:12px;cursor:pointer;border:1px solid transparent}
+.item:hover{background:var(--panel)}
+.item.sel{background:var(--panel2);border-color:var(--line)}
+.item .t{font-weight:700}
+.item .s{color:var(--muted);font-size:13px;grid-column:1}
+.item .m{color:var(--muted);font-size:12px;grid-column:1/3;display:flex;gap:10px}
+.badge{font-size:12px;padding:2px 10px;border-radius:999px;align-self:start;white-space:nowrap}
+.b-approved{background:var(--ok-soft);color:var(--ok)}
+.b-pending{background:var(--warn-soft);color:var(--warn)}
+.b-rejected{background:var(--bad-soft);color:var(--bad)}
+.type{color:var(--gold)}
+section.detail{overflow:auto;padding:20px 28px}
+.empty{color:var(--muted);text-align:center;margin-top:20vh;font-size:17px}
+.d-grid{display:grid;grid-template-columns:auto 1fr;gap:28px;align-items:start}
+video{width:340px;aspect-ratio:9/16;background:#000;border-radius:var(--radius);display:block}
+.novideo{width:340px;aspect-ratio:9/16;border-radius:var(--radius);background:var(--panel);display:grid;place-items:center;color:var(--muted)}
+h2{margin:0 0 4px;font-size:24px}
+.sub{color:var(--muted);margin-bottom:14px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.btn{border:0;border-radius:10px;padding:9px 18px;cursor:pointer;font-weight:700;background:var(--panel2)}
+.btn:hover{filter:brightness(1.15)}
+.btn.ok{background:var(--ok);color:#0b1a13}
+.btn.bad{background:var(--bad-soft);color:var(--bad)}
+.btn.gold{background:var(--gold);color:#221a05}
+.btn:disabled{opacity:.45;cursor:default}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px;color:var(--muted);font-weight:600}
+.ayah{font-family:"Quran";font-size:26px;line-height:2;color:var(--gold)}
+.ayah .k{font-family:"Naskh";font-size:12px;color:var(--muted);margin-inline-start:8px}
+.flag{padding:8px 12px;border-radius:10px;background:var(--warn-soft);color:var(--warn);margin-bottom:6px}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:14px}
+.kv div:nth-child(odd){color:var(--muted)}
+.tabs{display:flex;gap:4px;margin-bottom:8px}
+.tabs button{background:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px;cursor:pointer;color:var(--muted);font-size:13px}
+.tabs button.on{color:var(--text);background:var(--panel2)}
+pre.cap{white-space:pre-wrap;font-family:inherit;margin:0;line-height:1.8}
+.seg{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:start;margin-bottom:8px}
+.seg .time{color:var(--muted);font-size:12px;padding-top:8px;direction:ltr;text-align:left}
+.seg textarea{width:100%;min-height:40px;resize:vertical;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;line-height:1.7}
+.seg .q{font-family:"Quran";font-size:20px;color:var(--gold);background:var(--gold-soft);border-radius:8px;padding:6px 10px}
+input[type=text],input[type=number],select,textarea.big{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+.title-in{width:100%;font-size:18px;font-weight:700;margin-bottom:6px}
+.jobs{max-width:900px}
+.form{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+.log{background:#0a0d0f;border:1px solid var(--line);border-radius:10px;padding:10px 12px;height:320px;overflow:auto;direction:ltr;text-align:left;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;color:#c7d0d6}
+.hint{color:var(--muted);font-size:13px;margin-top:6px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 18px;border-radius:12px;opacity:0;transition:.25s;pointer-events:none}
+.toast.show{opacity:1}
+nav button,.job-pill{white-space:nowrap}
+@media (max-width:900px){
+  header{flex-wrap:wrap;gap:8px 12px;padding:10px 16px}
+  nav{margin-inline-start:0}
+  .job-pill{margin-inline-start:0;width:100%;justify-content:center}
+  main{grid-template-columns:1fr;height:auto}
+  aside{max-height:45vh;border-inline-end:0;border-bottom:1px solid var(--line)}
+  section.detail{padding:16px}
+  .d-grid{grid-template-columns:1fr}
+  video,.novideo{width:100%;max-width:340px;margin-inline:auto}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">ازْدَدْ <small>لوحة التحكم</small></div>
+  <nav>
+    <button data-view="videos" class="on">الفيديوهات</button>
+    <button data-view="jobs">توليد وتجهيز</button>
+  </nav>
+  <div class="job-pill" id="jobPill" title="آخر شغلانة"><span class="dot" id="jobDot"></span><span id="jobText">مفيش شغل شغال</span></div>
+</header>
+
+<main id="vVideos">
+  <aside>
+    <div class="filters" id="filters"></div>
+    <div class="list" id="list"></div>
+  </aside>
+  <section class="detail" id="detail"><div class="empty">اختار فيديو من القائمة</div></section>
+</main>
+
+<main id="vJobs" style="display:none;grid-template-columns:1fr">
+  <section class="detail jobs">
+    <div class="card">
+      <h3>توليد فيديوهات قرآنية</h3>
+      <div class="form">
+        <label>العدد<input type="number" id="gCount" value="3" min="1" max="10" style="width:80px"></label>
+        <label>القارئ<select id="gReciter"><option value="">عشوائي</option></select></label>
+        <label>نوع المقطع<select id="gCategory"><option value="">عشوائي</option></select></label>
+        <label>مقطع معيّن (اختياري)<input type="text" id="gPassage" placeholder="مثال 93:3-5" style="width:130px;direction:ltr"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="gDry" checked> تجربة (من غير ما يتسجل في السجل)</label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="gPub"> انشر وجدول بعد التوليد</label>
+        <button class="btn gold" id="gGo">ابدأ التوليد</button>
+      </div>
+      <div class="hint">التسجيل النادر (١٩٦٧) بيتعمله محاذاة بـ whisper على جهازك — أول مرة لكل سورة بتاخد وقت.</div>
+    </div>
+    <div class="card">
+      <h3>النشر</h3>
+      <div class="form">
+        <button class="btn" id="pDry">عرض جدول النهارده (تجربة)</button>
+        <button class="btn gold" id="pGo">جدولة فيديوهات النهارده على المنصات</button>
+        <button class="btn" id="pClean">تحديث حالة المنشورات</button>
+        <button class="btn" id="pCheck">فحص المفاتيح</button>
+      </div>
+      <div class="hint">يوتيوب وتيك توك وإنستجرام عن طريق Buffer، وفيسبوك مباشرة. كل فيديو بيتنشر مرة واحدة بس — اللي اتجدول قبل كده بيتخطى.</div>
+    </div>
+    <div class="card">
+      <h3>الدروس</h3>
+      <div class="form" style="margin-bottom:12px">
+        <label>الشيخ<select id="fSheikh"><option value="samir_mostafa">الشيخ سمير مصطفى</option><option value="amgad_samir">الشيخ أمجد سمير</option></select></label>
+        <label style="flex:1">روابط الدروس (كل رابط في سطر)<textarea class="big" id="fUrls" rows="2" style="direction:ltr"></textarea></label>
+        <button class="btn" id="fGo">تحميل</button>
+      </div>
+      <div class="form">
+        <label>الشيخ<select id="lSheikh"><option value="">الكل</option><option value="samir_mostafa">الشيخ سمير مصطفى</option><option value="amgad_samir">الشيخ أمجد سمير</option></select></label>
+        <label>مقاطع لكل درس<input type="number" id="lPer" value="5" min="1" max="20" style="width:80px"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="lForce"> أعد تجهيز المقاطع الموجودة</label>
+        <button class="btn gold" id="lGo">تفريغ وتجهيز المقاطع</button>
+      </div>
+      <div class="hint">التفريغ على الـ CPU بياخد حوالي ١.٤ ضعف طول الدرس، وبيتحفظ فمش بيتعاد. المقاطع بتروح للمراجعة في تبويب الفيديوهات.</div>
+    </div>
+    <div class="card">
+      <h3 id="logTitle">سجل الشغلانة</h3>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k !== null && k !== undefined) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+};
+const api = async (url, body) => {
+  const r = await fetch(url, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+};
+const toast = msg => { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 2200); };
+const STATUS = {approved: "متوافق عليه", pending: "محتاج مراجعة", rejected: "مرفوض"};
+const fmt = s => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`; };
+
+let items = [], selected = null, filter = localStorage.getItem("filter") || "pending";
+
+// ---------------------------------------------------------------- list
+const FILTERS = [["pending", "محتاج مراجعة"], ["all", "الكل"], ["approved", "متوافق عليه"], ["rejected", "مرفوض"], ["lecture", "دروس"], ["quran", "قرآن"]];
+function renderFilters() {
+  const box = $("#filters"); box.innerHTML = "";
+  for (const [k, label] of FILTERS) {
+    const n = items.filter(i => match(i, k)).length;
+    box.append(el("button", {class: "chip" + (filter === k ? " on" : ""), onclick: () => { filter = k; localStorage.setItem("filter", k); renderFilters(); renderList(); }}, label, el("b", {}, n)));
+  }
+}
+const match = (i, k) => k === "all" || i.status === k || i.type === k;
+function renderList() {
+  const box = $("#list"); box.innerHTML = "";
+  const shown = items.filter(i => match(i, filter));
+  if (!shown.length) box.append(el("div", {class: "empty", style: "margin-top:40px;font-size:14px"}, "مفيش فيديوهات هنا"));
+  for (const i of shown) {
+    box.append(el("div", {class: "item" + (selected === i.id ? " sel" : ""), onclick: () => select(i.id)},
+      el("div", {class: "t"}, i.title),
+      el("span", {class: "badge b-" + i.status}, STATUS[i.status]),
+      el("div", {class: "s"}, i.subtitle),
+      el("div", {class: "m"}, el("span", {class: "type"}, i.type === "lecture" ? "درس" : "قرآن"), el("span", {}, i.date), el("span", {}, fmt(i.duration)),
+        i.flags ? el("span", {style: "color:var(--warn)"}, `⚑ ${i.flags} ملاحظة`) : null)));
+  }
+}
+async function loadItems() {
+  items = await api("/api/items");
+  renderFilters(); renderList();
+}
+
+// ---------------------------------------------------------------- detail
+async function select(id) {
+  selected = id; renderList();
+  const {record: r, summary: s} = await api("/api/item/" + encodeURIComponent(id));
+  const d = $("#detail"); d.innerHTML = "";
+  const player = s.video ? el("video", {src: s.video + "?t=" + Math.round(s.mtime), controls: "", preload: "metadata"}) : el("div", {class: "novideo"}, "الفيديو لسه بيترندر");
+  const info = el("div", {});
+  d.append(el("div", {class: "d-grid"}, player, info));
+
+  info.append(el("h2", {}, s.title), el("div", {class: "sub"}, s.subtitle + " · " + fmt(s.duration) + " · " + s.date));
+  const act = el("div", {class: "actions"},
+    el("span", {class: "badge b-" + s.status, style: "align-self:center"}, STATUS[s.status]),
+    el("button", {class: "btn ok", onclick: () => setStatus(id, "approve")}, "✔ موافقة"),
+    el("button", {class: "btn bad", onclick: () => setStatus(id, "reject")}, "✕ رفض"),
+    s.status !== "pending" ? el("button", {class: "btn", onclick: () => setStatus(id, "reset")}, "رجّعه للمراجعة") : null);
+  info.append(act);
+  if (s.type === "quran" && !r.review_required) info.append(el("div", {class: "hint", style: "margin:-6px 0 12px"}, "الفيديوهات القرآنية العادية متوافق عليها تلقائيًا؛ ارفض أي فيديو مش عاجبك."));
+
+  if ((r.flags || []).length) {
+    const c = el("div", {class: "card"}, el("h3", {}, "محتاج تراجع"));
+    for (const f of r.flags) c.append(el("div", {class: "flag"}, f.note));
+    info.append(c);
+  }
+  if (r.type === "lecture") info.append(lectureEditor(r));
+  else info.append(quranCard(r));
+  info.append(publishedCard(r));
+  info.append(captionsCard(r));
+}
+
+function publishedCard(r) {
+  const pub = r.published || {};
+  const names = {youtube: "يوتيوب", tiktok: "تيك توك", instagram: "إنستجرام", facebook: "فيسبوك"};
+  const st = {scheduled: "مجدول", sending: "بيتنشر", sent: "اتنشر", error: "فشل", draft: "مسودة"};
+  const c = el("div", {class: "card"}, el("h3", {}, "النشر"));
+  const keys = Object.keys(pub);
+  if (!keys.length) { c.append(el("div", {class: "hint", style: "margin:0"}, "لسه متجدولش على أي منصة")); return c; }
+  const kv = el("div", {class: "kv"});
+  for (const k of keys) {
+    const i = pub[k], when = i.due ? new Date(i.due).toLocaleString("ar-EG", {timeZone: "Africa/Cairo", dateStyle: "medium", timeStyle: "short"}) : "";
+    kv.append(el("div", {}, names[k] || k), el("div", {}, `${st[i.status] || i.status || ""} · ${when} `, i.link ? el("a", {href: i.link, target: "_blank", style: "color:var(--gold)"}, "فتح") : null));
+  }
+  c.append(kv);
+  return c;
+}
+
+function quranCard(r) {
+  const c = el("div", {class: "card"}, el("h3", {}, "الآيات (نص الـ API بالظبط)"));
+  for (const a of r.ayat) c.append(el("div", {class: "ayah"}, a.text, el("span", {class: "k"}, a.key + (a.word_timing ? " · توقيت كلمة كلمة" : ""))));
+  const t = r.template || {};
+  c.append(el("div", {class: "kv", style: "margin-top:12px"},
+    el("div", {}, "القارئ"), el("div", {}, r.reciter.name),
+    el("div", {}, "صوت الطبيعة"), el("div", {}, r.ambience || "—"),
+    el("div", {}, "المقاطع"), el("div", {}, r.footage.map(f => f.credit || f.id).join(" · ")),
+    el("div", {}, "القالب"), el("div", {}, [t.font, t.position, t.applied_background, t.animation, t.grade].filter(Boolean).join(" · "))));
+  return c;
+}
+
+function lectureEditor(r) {
+  const c = el("div", {class: "card"}, el("h3", {}, "العنوان والترجمة النصية (عدّل وبعدين احفظ وأعد الرندر)"));
+  const title = el("input", {type: "text", class: "title-in", value: r.title || ""});
+  c.append(title);
+  const edits = [];
+  r.segments.forEach((s, i) => {
+    if (s.type === "quran") {
+      c.append(el("div", {class: "seg"}, el("div", {class: "time"}, fmt(s.start)), el("div", {class: "q"}, "﴿ " + s.text + " ﴾ ", el("span", {style: "font-family:Naskh;font-size:12px;color:var(--muted)"}, s.ref))));
+    } else {
+      const ta = el("textarea", {}); ta.value = s.text;
+      edits.push([i, ta]);
+      c.append(el("div", {class: "seg"}, el("div", {class: "time"}, fmt(s.start)), ta));
+    }
+  });
+  const save = async (andRender) => {
+    await api(`/api/item/${encodeURIComponent(r.id)}/save`, {title: title.value, segments: edits.map(([i, ta]) => ({index: i, text: ta.value}))});
+    toast("اتحفظ");
+    if (andRender) { const j = await api(`/api/item/${encodeURIComponent(r.id)}/render`, {}); toast(j.ok ? "بدأ الرندر — تابع من الشريط فوق" : j.error); }
+    await loadItems();
+  };
+  c.append(el("div", {class: "actions"},
+    el("button", {class: "btn", onclick: () => save(false)}, "حفظ"),
+    el("button", {class: "btn gold", onclick: () => save(true)}, "حفظ وإعادة رندر")));
+  c.append(el("div", {class: "kv", style: "margin-top:6px"},
+    el("div", {}, "المصدر"), el("div", {}, r.source.channel || "—"),
+    el("div", {}, "الرابط"), el("div", {style: "direction:ltr;text-align:right"}, r.source.url || r.source.file),
+    el("div", {}, "من / إلى"), el("div", {}, fmt(r.clip.start) + " ← " + fmt(r.clip.end) + "  (تقييم " + r.clip.score + ")"),
+    el("div", {}, "الشكل"), el("div", {}, r.layout)));
+  return c;
+}
+
+function captionsCard(r) {
+  const p = r.platforms || {};
+  const keys = Object.keys(p);
+  if (!keys.length) return el("span");
+  const names = {youtube: "يوتيوب", tiktok: "تيك توك", instagram: "إنستجرام", facebook: "فيسبوك"};
+  const body = el("pre", {class: "cap"});
+  const tabs = el("div", {class: "tabs"});
+  const show = k => { [...tabs.children].forEach(b => b.classList.toggle("on", b.dataset.k === k)); body.textContent = (p[k].title ? p[k].title + "\n\n" : "") + p[k].caption; };
+  for (const k of keys) { const b = el("button", {onclick: () => show(k)}, names[k] || k); b.dataset.k = k; tabs.append(b); }
+  const c = el("div", {class: "card"}, el("h3", {}, "الكابشن"), tabs, body);
+  show(keys[0]);
+  return c;
+}
+
+async function setStatus(id, action) {
+  const res = await api(`/api/item/${encodeURIComponent(id)}/${action}`, {});
+  toast({approve: "اتوافق عليه", reject: "اترفض", reset: "رجع للمراجعة"}[action] +
+        (res.job ? (res.job.ok ? " — بيتضاف لطابور النشر" : " — " + res.job.error) : ""));
+  if (res.job) pollJob();
+  await loadItems(); select(id);
+}
+
+// ---------------------------------------------------------------- jobs
+async function pollJob() {
+  try {
+    const j = await api("/api/job");
+    $("#jobDot").className = "dot" + (j.running ? " run" : "");
+    $("#jobText").textContent = j.name ? (j.running ? `${j.name} — ${fmt(j.elapsed)}` : `${j.name} — ${j.code === 0 ? "خلص" : "فشل"}`) : "مفيش شغل شغال";
+    $("#logTitle").textContent = j.name ? "سجل: " + j.name : "سجل الشغلانة";
+    const log = $("#log"), atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 10;
+    log.textContent = j.log.join("\n");
+    if (atEnd) log.scrollTop = log.scrollHeight;
+    if (window._wasRunning && !j.running) loadItems();
+    window._wasRunning = j.running;
+  } catch (e) {}
+}
+async function startJob(url, body) {
+  const j = await api(url, body);
+  toast(j.ok ? "بدأت" : j.error); pollJob();
+}
+$("#gGo").onclick = () => startJob("/api/job/generate", {count: +$("#gCount").value, reciter: $("#gReciter").value, category: $("#gCategory").value, passage: $("#gPassage").value.trim(), dry_run: $("#gDry").checked, publish: $("#gPub").checked});
+$("#lGo").onclick = () => startJob("/api/job/lectures", {sheikh: $("#lSheikh").value, per_file: +$("#lPer").value, force: $("#lForce").checked});
+$("#fGo").onclick = () => startJob("/api/job/fetch", {sheikh: $("#fSheikh").value, urls: $("#fUrls").value});
+$("#pDry").onclick = () => startJob("/api/job/publish", {dry_run: true});
+$("#pGo").onclick = () => { if (confirm("هتتجدول فيديوهات النهارده على المنصات فعلًا. متأكد؟")) startJob("/api/job/publish", {dry_run: false}); };
+$("#pCheck").onclick = () => startJob("/api/job/check", {});
+$("#pClean").onclick = () => startJob("/api/job/publish", {cleanup: true});
+$("#jobPill").onclick = () => showView("jobs");
+
+function showView(v) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+  $("#vVideos").style.display = v === "videos" ? "grid" : "none";
+  $("#vJobs").style.display = v === "jobs" ? "grid" : "none";
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => showView(b.dataset.view));
+
+(async () => {
+  const cfg = await api("/api/config");
+  for (const [k, v] of Object.entries(cfg.reciters)) $("#gReciter").append(el("option", {value: k}, v));
+  for (const c of cfg.categories) $("#gCategory").append(el("option", {value: c}, c));
+  await loadItems();
+  pollJob(); setInterval(pollJob, 2000);
+})();
+</script>
+</body>
+</html>

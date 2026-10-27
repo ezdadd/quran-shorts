@@ -1,0 +1,9 @@
+# daily run (GitHub Actions + local)
+pillow>=11
+requests>=2.32
+pyyaml>=6
+python-dotenv>=1
+tenacity>=9
+numpy>=2
+tzdata>=2024.1
+playwright==1.64.1   # pinned: an upgrade needs "python -m playwright install chromium"

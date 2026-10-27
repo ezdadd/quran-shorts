@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# environments / downloaded runtimes / caches
+.venv/
+.browsers/
+.cache/
+__pycache__/
+*.pyc
+*.part
+.claude/
+
+# big media that never goes to git
+assets/footage/
+assets/lectures/
+output/**/*.mp4
+output/**/*.wav
+output/visual_test/
+output/_*
+output/*.png
+output/*.jpg

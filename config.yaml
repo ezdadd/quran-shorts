@@ -1,0 +1,211 @@
+# ============================================================
+#  quran-shorts — كل الإعدادات هنا. الأسرار في .env بس.
+# ============================================================
+
+timezone: Africa/Cairo
+
+daily:
+  # عدد الفيديوهات في اليوم (ابدأ بـ 2–3 أول أسبوعين)
+  quran_count: 3
+  # عناصر من طابور المراجعة (دروس/تسجيلات نادرة متوافق عليها) تتنشر في اليوم زيادة على القرآني
+  queue_per_day: 1
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  lead_in: 1.0          # ثانية قبل أول آية
+  tail: 2.0             # ثانيتين بعد آخر آية
+  max_duration: 59.0    # الحد الأقصى لطول الفيديو
+  crf: 20
+  maxrate: 8M           # سقف للبت ريت (مقاطع المية والرغوة بتكبر الملف جدًا)
+  bufsize: 16M
+  preset: veryfast
+  audio_bitrate: 192k
+
+# ------------------------------------------------------------
+# القراء — الفولدرات اتأكدت من everyayah.com/data/recitations.js
+# quran_com_id: رقم التلاوة في Quran.com API v4 (لتوقيت كلمة كلمة)
+# ------------------------------------------------------------
+reciters:
+  husary:
+    name_ar: محمود خليل الحصري
+    everyayah_folder: Husary_128kbps
+    quran_com_id: 6
+    weight: 1
+  minshawi:
+    name_ar: محمد صديق المنشاوي
+    everyayah_folder: Minshawy_Murattal_128kbps
+    quran_com_id: 9
+    weight: 1
+  # المصحف المجوّد للمنشاوي (الأداء الخاشع). label_ar بيظهر جنب اسم القارئ في الفيديو والكابشن.
+  # التلاوة المجوّدة بطيئة (آية 3:190 لوحدها 32 ث) فالمقاطع الطويلة بتتستبعد تلقائيًا.
+  minshawi_mujawwad:
+    name_ar: محمد صديق المنشاوي
+    label_ar: تلاوة باكية
+    everyayah_folder: Minshawy_Mujawwad_192kbps
+    quran_com_id: 8
+    weight: 1
+  # تسجيل نادر للمنشاوي (1967) من mp3quran.net. مفيش له توقيت آيات منشور، فبيتعمله
+  # محاذاة محليًا بـ whisper مع نص الـ API. weight: 0 = مش بيدخل التشغيل اليومي التلقائي؛
+  # بيتولد على جهازك بـ --reciter minshawi_1967 وكل فيديو منه لازم مراجعتك قبل النشر.
+  minshawi_1967:
+    name_ar: محمد صديق المنشاوي
+    label_ar: تلاوة نادرة ١٩٦٧
+    source: mp3quran_aligned
+    mp3quran_server: https://cdn.mp3quran.net/audio/muhammad-minshawi/r4/
+    mp3quran_moshaf: 10924
+    requires_review: true
+    weight: 0
+# قراء بيجيبوا Content ID claims اتكتبهم هنا عشان يتستبعدوا
+excluded_reciters: []
+
+quran:
+  # المصدر الأساسي للنص: Quran.com v4 (text_uthmani + كلمات متطابقة مع توقيت التلاوة)
+  # والنص بيتراجع على alquran.cloud (quran-uthmani) حرف بحرف بعد حذف التشكيل؛ لو اختلفوا المقطع بيترفض.
+  cross_check: true
+  # مقطع مايتكررش قبل كام يوم
+  passage_cooldown_days: 45
+
+# ------------------------------------------------------------
+# مقاطع الطبيعة: تصنيف -> كلمات بحث
+# ------------------------------------------------------------
+footage:
+  providers: [pexels, pixabay, local]   # بالترتيب؛ local = assets/footage/<category>/*.mp4
+  min_width: 1080
+  min_height: 1920
+  reuse_cooldown_days: 60
+  categories:
+    ocean:     ["ocean waves", "sea waves aerial", "calm sea", "ocean sunset", "waves on rocks"]
+    rain:      ["rain drops", "rain on leaves", "rainy window", "rain forest"]
+    forest:    ["forest", "green forest aerial", "sunlight trees", "misty forest"]
+    mountain:  ["mountains", "mountain clouds", "mountain lake", "snowy peaks"]
+    sky:       ["clouds timelapse", "sunset sky", "sky clouds", "starry night sky"]
+    desert:    ["desert dunes", "sand dunes aerial", "desert sunset"]
+    waterfall: ["waterfall", "waterfall slow motion", "jungle waterfall"]
+    river:     ["river", "mountain stream", "flowing water"]
+    snow:      ["snowfall", "snowy forest", "winter landscape"]
+    storm:     ["lightning storm", "storm clouds", "thunderstorm"]
+  category_weights:
+    ocean: 3
+    rain: 2
+    forest: 2
+    mountain: 2
+    sky: 3
+    desert: 1
+    waterfall: 2
+    river: 2
+    snow: 1
+    storm: 1
+  # كلمات في رابط المقطع تخليه يتستبعد (ناس / وشوش)
+  blocked_words: [man, woman, men, women, person, people, girl, boy, child, kid, couple,
+                  surfer, surfing, swimmer, hiker, tourist, face, portrait, model, family,
+                  friends, selfie, wedding, dancing, yoga, fishing, walking, running, holding]
+
+# ------------------------------------------------------------
+# صوت الطبيعة: تصنيف المقطع -> فولدرات assets/ambience/
+# ------------------------------------------------------------
+ambience:
+  enabled: true
+  # مستوى صوت الطبيعة نسبةً للتلاوة (dB)
+  level_db: [-28, -22]
+  fade: 2.0
+  target_lufs: -14
+  map:
+    ocean:     [ocean]
+    rain:      [rain]
+    forest:    [forest, birds]
+    mountain:  [wind]
+    sky:       [wind]
+    desert:    [wind]
+    waterfall: [river]
+    river:     [river]
+    snow:      [wind]
+    storm:     [storm, rain]
+
+# ------------------------------------------------------------
+# القوالب العشوائية (الأوزان قابلة للتعديل)
+# ------------------------------------------------------------
+templates:
+  # خطوط عريضة (Bold) وحجم كبير عشان الوضوح. size = الحجم المبدئي؛ الآية الطويلة بتتقسم على
+  # أكتر من شاشة بدل ما الخط يصغر. max_lines = أقصى عدد سطور في الشاشة الواحدة.
+  fonts:
+    noto_naskh:   {file: "NotoNaskhArabic[wght].ttf", css_weight: 700, weight: 3, size: 90}
+    scheherazade: {file: ScheherazadeNew-Bold.ttf, weight: 3, size: 96}
+    amiri:        {file: Amiri-Bold.ttf, weight: 2, size: 92, attach_marks: true}
+    amiri_quran:  {file: AmiriQuran-Regular.ttf, weight: 1, size: 96, attach_marks: true}
+  min_size: 64
+  max_lines: {center: 4, lower: 3}
+  # center = نص الشاشة (أوضح مكان، بعيد عن أزرار المنصات والكابشن تحت)
+  position:   {center: 5, lower: 1}
+  background: {band: 5, blur: 2, dim: 1, shadow: 1}
+  animation:  {whole: 3, line: 2, word: 3}   # word بيشتغل بس لو توقيت الكلمات متاح
+  grade:      {none: 2, warm: 2, cool: 1}
+  ken_burns: 0.7      # احتمال الزوم البطيء
+  vignette: 0.5
+  show_title: 0.6     # اسم السورة ورقم الآية فوق
+  show_reciter: 0.7   # اسم القارئ تحت
+  colors:
+    white: "#FFFFFF"
+    gold:  "#F2D27A"
+    cream: "#FFF4DC"
+
+# ------------------------------------------------------------
+# الكابشن والهاشتاجات
+# ------------------------------------------------------------
+captions:
+  openers:
+    - "آيات تريح القلب"
+    - "استمع بقلبك"
+    - "دقيقة مع كتاب الله"
+    - "طمأنينة"
+    - "تلاوة خاشعة"
+    - "تدبّر"
+    - "سبحان الله"
+    - "لحظة سكينة"
+  hashtags_core: ["#قرآن", "#تلاوة", "#القرآن_الكريم"]
+  hashtags_pool: ["#راحة_نفسية", "#تدبر", "#قرآن_كريم", "#طمأنينة", "#ذكر_الله",
+                  "#آيات", "#تلاوة_خاشعة", "#quran", "#shorts", "#اسلام", "#سكينة"]
+  hashtag_count: [3, 5]
+
+asr:
+  model: large-v3-turbo   # على الـ CPU: ~0.7x من الوقت الحقيقي (ساعة صوت ≈ 85 دقيقة)
+  compute_type: int8
+  cpu_threads: 4          # 8 خيوط كانت بتخلّص الذاكرة (mkl_malloc) مع الدروس الطويلة
+
+paths:
+  output: output
+  cache: .cache
+  history: data/history.json
+  passages: data/passages.json
+
+# ------------------------------------------------------------
+# تعريف القناة: سطر صغير تحت زي يوزر التيك توك (مش watermark كبيرة)
+# ------------------------------------------------------------
+branding:
+  handle: "ازْدَدْ · @EZDADD_"
+  y: 1735
+  size: 32
+  opacity: 0.9
+
+# ------------------------------------------------------------
+# الدروس (المرحلة 2)
+# ------------------------------------------------------------
+lectures:
+  min_seconds: 30
+  max_seconds: 60
+
+# ------------------------------------------------------------
+# النشر (المرحلة 3)
+# youtube/tiktok/instagram عن طريق Buffer (الخطة المجانية: 3 قنوات)، وfacebook عن طريق Meta مباشرة
+# ------------------------------------------------------------
+publishing:
+  platforms: [youtube, tiktok, instagram, facebook]
+  # نوافذ النشر بتوقيت القاهرة؛ كل فيديو بياخد وقت عشوائي في نافذة
+  windows: ["07:00-10:00", "12:00-15:00", "17:00-19:00", "20:00-22:00", "22:00-23:55"]
+  min_gap_minutes: 120           # أقل فرق بين أي فيديوهين
+  platform_offset_minutes: [5, 40]  # كل منصة بتاخد نفس الفيديو بفرق عشوائي
+  min_lead_minutes: 25           # أقل وقت بين الجدولة والنشر (فيسبوك محتاج 10+ دقايق)
+  youtube_category: "27"         # Education
+  delete_hosted_after_hours: 6   # يمسح الفيديو من Cloudinary بعد النشر بالوقت ده
+  facebook_api_version: v26.0
