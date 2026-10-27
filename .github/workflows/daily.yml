@@ -14,6 +14,10 @@ on:
         description: "Dry run: generate only — publish nothing, commit nothing"
         type: boolean
         default: false
+      count:
+        description: "Force this many Quran videos (empty = top up to the daily count)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -78,7 +82,10 @@ jobs:
           restore-keys: quran-data-
 
       - name: Generate today's videos
-        run: python -m src.main --top-up --no-publish ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: >
+          python -m src.main --no-publish
+          ${{ inputs.count && format('--generate {0}', inputs.count) || '--top-up' }}
+          ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Clean up yesterday + publish today (one retry)
         if: ${{ !inputs.dry_run }}
