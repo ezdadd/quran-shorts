@@ -341,6 +341,7 @@ def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
     labels = [{"text": rec["title"], "y": 120, "size": 50}] if rec.get("title") else []
     labels += [{"text": rec["sheikh_name"], "y": b.get("y", 1735) - 75, "size": 42},
                {"text": b.get("handle", ""), "y": b.get("y", 1735), "size": b.get("size", 32), "pill": True}]
+    labels = [x for x in labels if x["text"]]
     lab_png = work / "_labels.png"
     tr.labels(labels).save(lab_png)
 

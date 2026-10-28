@@ -28,8 +28,21 @@ from . import store
 log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
+URL_IN = re.compile(r"https?://\S+")
 ID_RE = re.compile(r"\b([ql]-[\w-]+?-\d{2,4})\b")
 STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك"}
+
+
+HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه، وممكن تضيف:
+• وقت: 1:20-2:05
+• سطر: الشيخ محمد متولي الشعراوي
+• سطر: عنوان: الرزق
+• عدد: 3 مقاطع (لو مفيش وقت محدد)
+هاخد الصوت بس وأركبه على فيديو طبيعة بترجمة، ويوصلك هنا للمراجعة.
+
+✅ / ❌ تحت أي فيديو = موافقة / رفض
+↩️ رد على فيديو بـ #وسم1 #وسم2 أو +#وسم -#وسم لتعديل الهاشتاجات
+/status حالة الفيديوهات"""
 
 
 class TelegramError(Exception):
@@ -56,6 +69,13 @@ def api(method: str, files=None, http_timeout=60, **params):
     return body["result"]
 
 
+def _media(msg: dict) -> dict | None:
+    for k in ("video", "audio", "voice", "video_note", "document"):
+        if msg.get(k):
+            return msg[k]
+    return None
+
+
 def _kb(video_id: str, status: str | None) -> str:
     import json
     if status in ("approved", "rejected"):
@@ -78,7 +98,16 @@ def _caption(r: dict, reviews: dict) -> str:
     cap = store.final_caption(r, "tiktok", reviews)
     tpl = r.get("template", "")
     head = f"🗓 {r.get('date', '')}   🆔 {r['id']}"
-    if r.get("type") == "lecture":
+    if r.get("kind") == "clip":
+        head += "\n🎙 مقطع من لينك" + (f" · {r['sheikh_name']}" if r.get("sheikh_name") else "")
+        kinds = {f.get("type") for f in r.get("flags") or []}
+        if "quran" in kinds:
+            head += "\n📖 فيه آية — اتعرضت بالنص الموثّق"
+        if "hadith" in kinds:
+            head += "\n⚠️ فيه حديث — اتأكد إن الكلام صح قبل الموافقة"
+        if "asr" in kinds:
+            head += "\n⚠️ الترجمة فيها كلمات مش واضحة — راجعها"
+    elif r.get("type") == "lecture":
         head += "\n🎙 درس"
     s = f"{head}\n\n{cap}\n\nالحالة: {STATUS.get(e.get('status'))}"
     if not e.get("status"):
@@ -144,6 +173,20 @@ def send(cfg) -> int:
     return sent
 
 
+def send_one(cfg, path: Path) -> None:
+    """Post one record (clip / queue item) for review right away."""
+    r = read_json(path, {})
+    from ..publish.runner import video_file
+    mp4 = video_file(path, r)
+    with open(mp4, "rb") as f:
+        msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
+                  chat_id=owner(), caption=_caption(r, store.load()), supports_streaming="true",
+                  width=1080, height=1920, reply_markup=_kb(r["id"], None))
+    r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner()}
+    write_json(path, r)
+    log.info("sent %s for review", r["id"])
+
+
 # --------------------------------------------------------------------------- poll (hourly)
 def _unschedule(r: dict) -> list[str]:
     """Rejecting something already scheduled: remove it from Buffer / Facebook."""
@@ -192,6 +235,7 @@ def poll(cfg) -> bool:
     me = owner()
     today = datetime.now(ZoneInfo(cfg["timezone"])).date().isoformat()
     rerun = False
+    clip_requests: list[dict] = []
     updates = api("getUpdates", offset=state["offset"], timeout=0,
                   allowed_updates='["message","callback_query"]')
     for u in updates:
@@ -232,8 +276,30 @@ def poll(cfg) -> bool:
                 continue
             text = (msg.get("text") or "").strip()
             reply = msg.get("reply_to_message")
-            if text.startswith("/status") or text.startswith("/start"):
+            if text.startswith("/help"):
+                api("sendMessage", chat_id=me, text=HELP)
+            elif text.startswith("/status") or text.startswith("/start"):
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
+            elif not reply and (URL_IN.search(text) or _media(msg)):
+                media = _media(msg)
+                from ..clips import parse_request
+                req = parse_request(text or msg.get("caption") or "")
+                if media:
+                    if (media.get("file_size") or 0) > 20 * 1024 * 1024:
+                        api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                            text="الملف أكبر من 20 ميجا (حد تيليجرام للبوتات). ابعت لينك بداله أو قص الجزء المطلوب.")
+                        continue
+                    req["file_id"] = media["file_id"]
+                req.update(id=str(msg["message_id"]), msg_id=msg["message_id"])
+                clip_requests.append(req)
+                if req.get("start") is not None:
+                    a, b = int(req["start"]), int(req["end"])
+                    when = f" من {a // 60}:{a % 60:02d} لـ {b // 60}:{b % 60:02d}"
+                else:
+                    when = " (هختار أحسن جزء: جملة كاملة 20-60 ث)"
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text=f"✅ استلمت{when}. هاخد الصوت بس وأركبه على فيديو من عندنا بترجمة، "
+                         "وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
             elif reply and text:
                 m = ID_RE.search(reply.get("caption") or reply.get("text") or "")
                 path, r = _record(m.group(1)) if m else (None, {})
@@ -260,6 +326,11 @@ def poll(cfg) -> bool:
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
     store.save(reviews)
     write_json(STATE, state)
+    # handed to the workflow, which starts one clip job per request
+    import json
+    out = ROOT / ".cache" / "clip_requests.jsonl"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in clip_requests), encoding="utf-8")
     return rerun
 
 

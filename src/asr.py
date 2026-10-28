@@ -7,6 +7,7 @@ the API, never from recognition.
 from __future__ import annotations
 
 import hashlib
+import os
 import logging
 import subprocess
 import time
@@ -29,7 +30,7 @@ def _load_model(cfg):
         t = time.time()
         _model = WhisperModel(a.get("model", "large-v3-turbo"), device="cpu",
                               compute_type=a.get("compute_type", "int8"),
-                              cpu_threads=a.get("cpu_threads", 8))
+                              cpu_threads=int(os.environ.get("ASR_THREADS") or a.get("cpu_threads", 8)))
         log.info("whisper model loaded in %.0fs", time.time() - t)
     return _model
 

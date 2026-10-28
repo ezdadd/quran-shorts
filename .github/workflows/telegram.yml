@@ -53,6 +53,15 @@ jobs:
             for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 10; done
           fi
 
+      - name: Start a clip job for every link / file you sent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -s .cache/clip_requests.jsonl ] || exit 0
+          while IFS= read -r req; do
+            gh workflow run clip.yml -R ${{ github.repository }} -f req="$req"
+          done < .cache/clip_requests.jsonl
+
       - name: Schedule approved / replace rejected now
         if: steps.poll.outputs.rerun == 'true'
         env:
