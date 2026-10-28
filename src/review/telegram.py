@@ -74,7 +74,8 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
     if data == "g:t":
         return ("⚙️ عايز تعمل إيه؟", _gen_kb([[("📖 آيات قرآن", "g:q")],
                                             [("📜 حديث (قريبًا)", "g:h")],
-                                            [("🎙 مقطع من لينك", "g:l")]]))
+                                            [("🎙 مقطع من لينك", "g:l")],
+                                            [("📊 الطابور (/que)", "g:que")]]))
     if data == "g:q":
         th = _themes(cfg)
         rows = [[("🎲 أي موضوع (الأغلب حكمة وصبر ووعظ)", "g:q:-")]]
@@ -108,6 +109,13 @@ def generate_callback(cfg, cq: dict) -> None:
     data, chat, mid = cq["data"], cq["message"]["chat"]["id"], cq["message"]["message_id"]
     p = data.split(":")
     note, kb = "", None
+    if data == "g:que":                 # the queue counts as a new message; the menu stays
+        api("sendMessage", chat_id=chat, text=queue_text(cfg, store.load(), read_json(STATE, {})))
+        try:
+            api("answerCallbackQuery", callback_query_id=cq["id"])
+        except TelegramError:
+            pass
+        return
     if data == "g:h":
         text, kb, note = ("📜 فيديوهات الأحاديث لسه بتتعمل: هتكون من مصادر موثقة بس (بدرجة الصحة والتخريج)، "
                           "وأول ما تجهز هتظهر هنا."), _gen_kb([[("⬅️ رجوع", "g:t")]]), "قريبًا"

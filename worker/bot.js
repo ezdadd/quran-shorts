@@ -57,9 +57,10 @@ async function telegram(req, env, ctx) {
   await env.UPDATES.put(`u:${String(u.update_id).padStart(12, "0")}`, JSON.stringify(u),
                         { expirationTtl: 7 * 86400 });
   if (cq) {
-    const note = isFinal(cq.data) ? "اتسجل ✅ — بيبدأ خلال دقيقة" : "اتسجل ✅ — ثواني ويتحدث";
+    const note = cq.data === "g:que" ? "📊 ثواني وتوصلك الأرقام" :
+                 isFinal(cq.data) ? "اتسجل ✅ — بيبدأ خلال دقيقة" : "اتسجل ✅ — ثواني ويتحدث";
     ctx.waitUntil(tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: note }));
-    if (isFinal(cq.data))
+    if (isFinal(cq.data) && cq.data !== "g:que")
       ctx.waitUntil(tg(env, "editMessageText", { chat_id: chat, message_id: cq.message.message_id,
                                                  text: "⏳ اتسجل — بيتجهز دلوقتي…" }));
   } else {
@@ -69,7 +70,8 @@ async function telegram(req, env, ctx) {
   return new Response("ok");
 }
 
-function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<sheikh>
+function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<sheikh>  (g:que: needs the repo)
+  if (d === "g:que") return true;
   const p = d.split(":");
   return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4);
 }
@@ -128,7 +130,8 @@ async function menu(env, data) {
   const sheikhRows = (prefix, back) => [[["🎲 أي شيخ", `${prefix}:-`]],
     ...pairs(m.reciters.map(([, label], i) => [label, `${prefix}:${i}`])), [["⬅️ رجوع", back]]];
   if (data === "g:t")
-    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث (قريبًا)", "g:h"]], [["🎙 مقطع من لينك", "g:l"]]])];
+    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث (قريبًا)", "g:h"]], [["🎙 مقطع من لينك", "g:l"]],
+                                     [["📊 الطابور (/que)", "g:que"]]])];
   if (data === "g:q")
     return ["📖 آيات قرآن — اختار الموضوع، أو اكتب سورة وآيات بعينها:",
             kb([[["🎲 أي موضوع (الأغلب حكمة وصبر ووعظ)", "g:q:-"]], ...pairs(m.themes.map((t, i) => [t, `g:q:${i}`])),
