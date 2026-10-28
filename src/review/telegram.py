@@ -123,7 +123,8 @@ def _caption(r: dict, reviews: dict) -> str:
     elif r.get("type") == "lecture":
         head += "\n🎙 درس"
     st = e.get("status")
-    if st is None and (r.get("auto") or {}).get("status") == "approved":
+    if (st is None and (r.get("auto") or {}).get("status") == "approved") or \
+            (st == "approved" and e.get("by") == "auto"):
         st = "auto"
     s = f"{head}\n\n{cap}\n\nالحالة: {STATUS.get(st)}"
     if (r.get("auto") or {}).get("status") == "held" and not e.get("status"):
@@ -131,6 +132,59 @@ def _caption(r: dict, reviews: dict) -> str:
     if not e.get("status"):
         s += "\n↩️ رد على الفيديو بهاشتاجات جديدة لتعديلها (+#وسم ‎-#وسم للإضافة/الحذف)"
     return s[:1024]
+
+
+def quran_check(cfg, r: dict) -> str | None:
+    """Automatic checks standing in for your review of a Quran video. None = fine, else the reason.
+    (The ayah text itself was already verified against two sources when the video was made.)"""
+    from ..publish import hosting
+    v = cfg["video"]
+    if not r.get("ayat") or any(not a.get("text") for a in r["ayat"]):
+        return "نص الآيات ناقص"
+    if not 5 <= float(r.get("duration") or 0) <= float(v["max_duration"]) + 1:
+        return f"مدة الفيديو غلط ({r.get('duration')} ث)"
+    if not all(((r.get("platforms") or {}).get(p) or {}).get("caption") for p in ("youtube", "tiktok")):
+        return "الوصف ناقص"
+    url = (r.get("hosting") or {}).get("url")
+    if not url or (r.get("hosting") or {}).get("deleted") or not hosting.url_is_public(url):
+        return "ملف الفيديو مش موجود على الاستضافة"
+    return None
+
+
+def quran_auto(cfg, reviews: dict, today: str) -> bool:
+    """Daily Quran videos you haven't touched for publishing.auto_approve_hours: run the checks and
+    approve them (or reject them, so a replacement is made). Your ✅/❌/↩️ always wins. Recordings
+    that need a human (review_required) are never auto-approved. Returns True when today's
+    schedule needs another publishing run."""
+    pc = cfg["publishing"]
+    if not pc.get("auto_approve", True):
+        return False
+    now = datetime.now(timezone.utc)
+    delay = timedelta(hours=float(pc.get("auto_approve_hours", 2)))
+    rerun = False
+    for p in sorted(OUTPUT.glob("*/q-*.json")):
+        r = read_json(p, {})
+        tg = r.get("telegram") or {}
+        if not tg.get("message_id") or r.get("published") or r.get("rejected") or r.get("review_required") \
+                or store.get(r["id"], reviews).get("status") or r.get("date", "") < today:
+            continue
+        sent = tg.get("sent_at")
+        if sent and now - datetime.fromisoformat(sent) < delay:
+            continue
+        problem = quran_check(cfg, r)
+        store.set_status(reviews, r["id"], "rejected" if problem else "approved", by="auto")
+        log.info("%s auto-%s %s", r["id"], "rejected" if problem else "approved", problem or "")
+        if problem:
+            api("sendMessage", chat_id=owner(), reply_to_message_id=tg["message_id"],
+                text=f"🤖 الفيديو ده فشل في الفحص التلقائي ({problem}) — اترفض وهيتعمل بداله.")
+        try:
+            api("editMessageCaption", chat_id=owner(), message_id=tg["message_id"], caption=_caption(r, reviews),
+                reply_markup=_kb(r["id"], store.get(r["id"], reviews).get("status")))
+        except TelegramError:
+            pass
+        if problem or r.get("date") == today:
+            rerun = True                # replace it / schedule today's video now
+    return rerun
 
 
 def _days(cfg) -> list[date]:
@@ -180,14 +234,16 @@ def send(cfg) -> int:
                 msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
                           chat_id=owner(), caption=_caption(r, reviews), supports_streaming="true",
                           width=1080, height=1920, reply_markup=_kb(r["id"], None))
-            r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner()}
+            r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner(),
+                             "sent_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             write_json(p, r)
             sent += 1
             log.info("sent %s for review", r["id"])
     if waiting_today:
         api("sendMessage", chat_id=owner(),
-            text=f"⏳ {waiting_today} فيديو من فيديوهات النهارده لسه مستنيين موافقتك — "
-                 "اللي هتوافق عليه هيتجدول في الأوقات اللي فاضلة النهارده.")
+            text=f"⏳ {waiting_today} فيديو من فيديوهات النهارده مستنيين — لو معملتش حاجة خلال "
+                 f"{cfg['publishing'].get('auto_approve_hours', 2):g} ساعة، بيتفحصوا تلقائي ويتوافق عليهم "
+                 "ويتجدولوا لوحدهم. ❌ أي وقت قبل النشر بيلغي.")
     return sent
 
 
@@ -531,6 +587,7 @@ def poll(cfg) -> bool:
                     api("sendMessage", chat_id=me,
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
     clip_requests += agent_due(cfg, reviews, state)
+    rerun = quran_auto(cfg, reviews, today) or rerun
     if state.get("commands") != COMMANDS_VERSION:     # the bot's "/" menu
         try:
             import json
