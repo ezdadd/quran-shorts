@@ -18,6 +18,14 @@ on:
         description: "Force this many Quran videos (empty = top up to the daily count)"
         type: string
         default: ""
+      theme:
+        description: "Only this theme (a quran.theme_weights key; empty = any)"
+        type: string
+        default: ""
+      jobs:
+        description: 'From /generate: JSON list [{"count":3,"theme":"","reciter":"","passage":"18:1-10"}]'
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -82,9 +90,22 @@ jobs:
           restore-keys: quran-data-
 
       - name: Generate videos for today and the next days (tops up rejected ones too)
+        env:
+          COUNT: ${{ inputs.count }}     # via env, never pasted into the shell command
+          THEME: ${{ inputs.theme }}
+          JOBS: ${{ inputs.jobs }}
         run: |
+          if [ -n "$JOBS" ]; then          # /generate menu: each job = count + theme / sheikh / passage
+            echo "$JOBS" | jq -c '.[]' | while read -r j; do
+              N=$(echo "$j" | jq -r '.count'); T=$(echo "$j" | jq -r '.theme // ""')
+              R=$(echo "$j" | jq -r '.reciter // ""'); P=$(echo "$j" | jq -r '.passage // ""')
+              python -m src.main --no-publish --generate "$N" ${T:+--theme "$T"} ${R:+--reciter "$R"} \
+                ${P:+--passage "$P"} || echo "job failed: $j"
+            done
+            exit 0
+          fi
           if [ -n "${{ inputs.count }}" ]; then
-            python -m src.main --no-publish --generate ${{ inputs.count }} ${{ inputs.dry_run && '--dry-run' || '' }}
+            python -m src.main --no-publish --generate "$COUNT" ${THEME:+--theme "$THEME"} ${{ inputs.dry_run && '--dry-run' || '' }}
             exit 0
           fi
           AHEAD=$(python -c "from src.util import load_config; print(load_config()['publishing'].get('days_ahead', 2))")

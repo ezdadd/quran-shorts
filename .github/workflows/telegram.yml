@@ -1,13 +1,13 @@
 name: telegram-review
 
-# Every 20 minutes: read your Telegram button presses / hashtag edits / commands, save them, and —
+# Every 5 minutes: read your Telegram button presses / hashtag edits / commands, save them, and —
 # when a video for today was approved or something was rejected — run the daily workflow again
 # so today's approved videos get scheduled and rejected ones get replaced.
 # Also starts the correction agent on clips you have not touched for agent.delay_hours.
 # (Public repo: Actions minutes are free. Telegram keeps unread updates for 24 h.)
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -70,7 +70,9 @@ jobs:
         if: steps.poll.outputs.generate != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run daily.yml -R ${{ github.repository }} -f count=${{ steps.poll.outputs.generate }}
+        run: |
+          # every request of this poll in one run: daily.yml keeps a single pending run, more would cancel
+          gh workflow run daily.yml -R ${{ github.repository }} -f jobs="$(cat .cache/generate_jobs.json)"
 
       - name: Schedule approved / replace rejected now
         if: steps.poll.outputs.rerun == 'true' && steps.poll.outputs.generate == ''

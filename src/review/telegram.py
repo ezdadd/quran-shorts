@@ -30,8 +30,192 @@ OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
 COMMANDS_VERSION = 3
-GENERATE = {"n": 0}     # /generate N during this poll -> the workflow starts daily.yml with count=N
-GENERATE_MAX = 10
+GENERATE: list[dict] = []   # /generate requests in this poll -> one daily.yml run with the job list
+GENERATE_MAX = 10           # videos per poll
+GEN_COUNTS = (1, 3, 5, 10)
+ASK_PASSAGE = "✍️ اكتب اسم السورة والآيات"
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _themes(cfg) -> list[str]:
+    return list((cfg.get("quran") or {}).get("theme_weights") or {})
+
+
+def _reciters(cfg) -> list[tuple[str, str]]:
+    """(id, label) for every reciter usable from the menu (not the ones that need a human check)."""
+    out = []
+    for rid, r in (cfg.get("reciters") or {}).items():
+        if r.get("requires_review") or float(r.get("weight", 1)) <= 0:
+            continue
+        label = r.get("name_ar", rid) + (" · مجوّد" if "mujawwad" in rid else "")
+        out.append((rid, label))
+    return out
+
+
+def _gen_kb(rows: list[list[tuple[str, str]]]) -> str:
+    import json
+    return json.dumps({"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in rows]})
+
+
+def _reciter_rows(cfg, prefix: str, back: str) -> list[list[tuple[str, str]]]:
+    rec = _reciters(cfg)
+    rows = [[("🎲 أي شيخ", f"{prefix}:-")]]
+    rows += [[(lab, f"{prefix}:{i}") for i, (_, lab) in enumerate(rec)][k:k + 2] for k in range(0, len(rec), 2)]
+    rows.append([("⬅️ رجوع", back)])
+    return rows
+
+
+def generate_menu(cfg, data: str) -> tuple[str, str | None]:
+    """(text, keyboard) for each menu step.  callback data:
+    g:t                 type        g:q            Quran: theme or a chosen surah
+    g:q:<t>             sheikh      g:q:<t>:<r>    count      g:q:<t>:<r>:<n>  -> start
+    g:P:<s.a-b>:<r>     a passage you typed -> start (one video)"""
+    p = data.split(":")
+    if data == "g:t":
+        return ("⚙️ عايز تعمل إيه؟", _gen_kb([[("📖 آيات قرآن", "g:q")],
+                                            [("📜 حديث (قريبًا)", "g:h")],
+                                            [("🎙 مقطع من لينك", "g:l")]]))
+    if data == "g:q":
+        th = _themes(cfg)
+        rows = [[("🎲 أي موضوع (الأغلب حكمة وصبر ووعظ)", "g:q:-")]]
+        rows += [[(t, f"g:q:{i}") for i, t in enumerate(th)][k:k + 2] for k in range(0, len(th), 2)]
+        rows += [[("✍️ سورة وآيات بالاسم", "g:s")], [("⬅️ رجوع", "g:t")]]
+        return "📖 آيات قرآن — اختار الموضوع، أو اكتب سورة وآيات بعينها:", _gen_kb(rows)
+    theme = lambda t: "أي موضوع" if t == "-" else _themes(cfg)[int(t)]          # noqa: E731
+    reciter = lambda r: "أي شيخ" if r == "-" else _reciters(cfg)[int(r)][1]     # noqa: E731
+    if p[1] == "q" and len(p) == 3:
+        return f"📖 {theme(p[2])} — اختار الشيخ:", _gen_kb(_reciter_rows(cfg, data, "g:q"))
+    if p[1] == "q" and len(p) == 4:
+        return (f"📖 {theme(p[2])} · {reciter(p[3])}\nكام فيديو؟",
+                _gen_kb([[(str(n), f"{data}:{n}") for n in GEN_COUNTS], [("⬅️ رجوع", f"g:q:{p[2]}")]]))
+    if p[1] == "Q":                     # the passage you typed was understood: pick the sheikh
+        return f"📖 {p[2].replace('.', ':')} — اختار الشيخ:", _gen_kb(_reciter_rows(cfg, f"g:P:{p[2]}", "g:q"))
+    return "", None
+
+
+def _enqueue(cfg, job: dict) -> str:
+    GENERATE.append(job)
+    n = job["count"]
+    what = f"سورة {job['passage_name']}" if job.get("passage") else \
+        (f"«{job['theme']}»" if job.get("theme") else "أي موضوع")
+    who = dict(_reciters(cfg)).get(job.get("reciter") or "", "أي شيخ")
+    return (f"✅ هعمل {n} فيديو قرآن — {what} — {who}.\nهيوصلوك هنا للمراجعة خلال حوالي {3 * n + 5} دقيقة، "
+            "وبعدها بيدخلوا الطابور ويتنشروا بالترتيب على الأيام الجاية.")
+
+
+def generate_callback(cfg, cq: dict) -> None:
+    """Button presses in the /generate menu."""
+    data, chat, mid = cq["data"], cq["message"]["chat"]["id"], cq["message"]["message_id"]
+    p = data.split(":")
+    note, kb = "", None
+    if data == "g:h":
+        text, kb, note = ("📜 فيديوهات الأحاديث لسه بتتعمل: هتكون من مصادر موثقة بس (بدرجة الصحة والتخريج)، "
+                          "وأول ما تجهز هتظهر هنا."), _gen_kb([[("⬅️ رجوع", "g:t")]]), "قريبًا"
+    elif data == "g:l":
+        text, kb = ("🎙 ابعت اللينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه هنا في الشات، وممكن تضيف:\n"
+                    "• وقت: 1:20-2:05\n• الشيخ ...\n• عنوان: ...\n"
+                    "الأطول من دقيقة بيتقسم أجزاء ورا بعض."), _gen_kb([[("⬅️ رجوع", "g:t")]])
+    elif data == "g:s":                 # ask for the passage as a reply (force_reply opens the keyboard)
+        import json
+        api("sendMessage", chat_id=chat, text=f"{ASK_PASSAGE} كرد على الرسالة دي، مثلًا:\n"
+                                              "الكهف 1-10\nالبقرة 286\n18:1-10\n"
+                                              "أو اسم السورة بس وأنا أختار مقطع منها.",
+            reply_markup=json.dumps({"force_reply": True, "input_field_placeholder": "الكهف 1-10"}))
+        text, note = "✍️ مستني اسم السورة والآيات (تحت).", "اكتب السورة"
+    elif p[1] == "P" and len(p) == 4:   # typed passage + sheikh -> one video
+        s, ab = p[2].split(".")
+        a, _, b = ab.partition("-")
+        rid = "" if p[3] == "-" else _reciters(cfg)[int(p[3])][0]
+        text = _enqueue(cfg, {"count": 1, "theme": "", "reciter": rid, "passage": f"{s}:{a}-{b or a}",
+                              "passage_name": _surah_names().get(int(s), s) + f" {a}" + (f"-{b}" if b and b != a else "")})
+        note = "اتبدأ"
+    elif p[1] == "q" and len(p) == 5:   # theme + sheikh + count -> start
+        rid = "" if p[3] == "-" else _reciters(cfg)[int(p[3])][0]
+        theme = "" if p[2] == "-" else _themes(cfg)[int(p[2])]
+        text = _enqueue(cfg, {"count": max(1, min(GENERATE_MAX, int(p[4]))), "theme": theme, "reciter": rid,
+                              "passage": ""})
+        note = "اتبدأ"
+    else:
+        text, kb = generate_menu(cfg, data)
+    try:
+        params = {"chat_id": chat, "message_id": mid, "text": text}
+        if kb:
+            params["reply_markup"] = kb
+        api("editMessageText", **params)
+    except TelegramError as e:
+        log.warning("generate menu: %s", e)
+    try:
+        api("answerCallbackQuery", callback_query_id=cq["id"], text=note)
+    except TelegramError:
+        pass
+
+
+# ---------------------------------------------------------------- typed surah / ayat
+_surahs: dict | None = None
+_TASHKEEL = re.compile("[ؐ-ًؚ-ٰٟۖ-ۭـ]")
+
+
+def _surah_list() -> list[dict]:
+    global _surahs
+    if _surahs is None:
+        r = requests.get("https://api.quran.com/api/v4/chapters", params={"language": "ar"}, timeout=30)
+        r.raise_for_status()
+        _surahs = {c["id"]: c for c in r.json()["chapters"]}
+    return list(_surahs.values())
+
+
+def _surah_names() -> dict[int, str]:
+    try:
+        return {c["id"]: c["name_arabic"] for c in _surah_list()}
+    except requests.RequestException:
+        return {}
+
+
+def _key(name: str) -> str:
+    s = _TASHKEEL.sub("", name).replace("سورة", "").strip()
+    s = s.translate(str.maketrans("أإآٱ", "اااا")).replace("ة", "ه").replace("ى", "ي").replace(" ", "")
+    return s[2:] if s.startswith("ال") else s
+
+
+def parse_passage(cfg, text: str) -> tuple[int, int, int] | str:
+    """'الكهف 1-10' / 'سورة البقرة ٢٨٦' / '18:1-10' / 'الكهف' -> (surah, from, to), or an error text."""
+    t = text.translate(_AR_DIGITS).strip()
+    m = re.match(r"^\s*(\d{1,3})\s*[:：]\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?\s*$", t)
+    chapters = {c["id"]: c for c in _surah_list()}
+    if m:
+        s, a, b = int(m.group(1)), int(m.group(2)), int(m.group(3) or m.group(2))
+    else:
+        nums = [int(x) for x in re.findall(r"\d{1,3}", t)]
+        name = _key(re.sub(r"[\d\-–:]+", " ", t))
+        found = [c for c in chapters.values() if _key(c["name_arabic"]) == name] or \
+                [c for c in chapters.values() if name and name in _key(c["name_arabic"])]
+        if not found:
+            return "مش لاقي سورة بالاسم ده. اكتبها زي المصحف، مثلًا: الكهف 1-10"
+        s = found[0]["id"]
+        if not nums:                     # surah only: one of our prepared passages from it, at random
+            import json
+            import random
+            ps = [p for p in json.loads((ROOT / cfg["paths"]["passages"]).read_text(encoding="utf-8"))["passages"]
+                  if p["surah"] == s and p["from"] > 1]
+            if not ps:
+                return f"اكتب أرقام الآيات كمان، مثلًا: {found[0]['name_arabic']} 1-5"
+            p = random.choice(ps)
+            return s, p["from"], p["to"]
+        a, b = nums[0], nums[1] if len(nums) > 1 else nums[0]
+    if s not in chapters:
+        return "رقم السورة لازم من 1 لـ 114"
+    n = chapters[s]["verses_count"]
+    if not (1 <= a <= b <= n):
+        return f"سورة {chapters[s]['name_arabic']} فيها {n} آية بس"
+    if a == 1 and s != 1:   # some reciters' ayah 1 audio carries the basmala, the text never does
+        if b == 1:
+            return "الآية 1 لوحدها مش بتنفع (البسملة بتختلف بين القراء) — ابدأ من آية 2"
+        a = 2
+    if b - a + 1 > 20:
+        return "كتير على فيديو دقيقة — اختار 20 آية أو أقل (الطويلة بتتقص لو عدت الدقيقة)"
+    return s, a, b
+
+
 ID_RE = re.compile(r"🆔\s*([\w-]+)")
 STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك",
           "waiting": "⏳ مستني موافقتك", "auto": "🤖 اتوافق تلقائيًا (المصحح) — تقدر ترفضه قبل النشر"}
@@ -455,6 +639,9 @@ def poll(cfg) -> bool:
         if cq:
             if str(cq["from"]["id"]) != me and str(cq["message"]["chat"]["id"]) != me:
                 continue
+            if cq["data"].startswith("g:"):     # the /generate menu
+                generate_callback(cfg, cq)
+                continue
             action, vid = cq["data"].split(":", 1)
             if action in ("A", "R"):            # a whole series at once
                 status = "approved" if action == "A" else "rejected"
@@ -515,8 +702,12 @@ def poll(cfg) -> bool:
                 api("sendMessage", chat_id=me, text=HELP)
             elif text.startswith("/generate"):
                 m = re.search(r"\d+", text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
-                n = max(1, min(GENERATE_MAX, int(m.group()) if m else 3))
-                GENERATE["n"] += n
+                if not m:               # no number: show the menu (type -> theme -> count)
+                    t, kb = generate_menu(cfg, "g:t")
+                    api("sendMessage", chat_id=me, text=t, reply_markup=kb)
+                    continue
+                n = max(1, min(GENERATE_MAX, int(m.group())))
+                GENERATE.append({"count": n, "theme": "", "reciter": "", "passage": ""})
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                     text=f"⚙️ هعمل {n} فيديو قرآن جديد (آيات حكمة وصبر ووعظ أغلبها). هيوصلوك هنا للمراجعة "
                          f"خلال حوالي {3 * n + 5} دقيقة. بعد موافقتك بيدخلوا الطابور ويتنشروا بالترتيب على "
@@ -548,6 +739,22 @@ def poll(cfg) -> bool:
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                     text=f"✅ استلمت{when}. هاخد الصوت بس وأركبه على فيديو من عندنا بترجمة، "
                          "وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
+            elif reply and text and (reply.get("text") or "").startswith(ASK_PASSAGE):
+                try:                    # the surah / ayat you typed for /generate
+                    res = parse_passage(cfg, text)
+                except requests.RequestException:
+                    res = "مش قادر أوصل لقائمة السور دلوقتي — جرب تاني كمان شوية"
+                if isinstance(res, str):
+                    import json
+                    api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                        text=f"{ASK_PASSAGE} — {res}",
+                        reply_markup=json.dumps({"force_reply": True, "input_field_placeholder": "الكهف 1-10"}))
+                    continue
+                s_, a_, b_ = res
+                t, kb = generate_menu(cfg, f"g:Q:{s_}.{a_}-{b_}")
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text=t.replace(f"{s_}:{a_}-{b_}", f"سورة {_surah_names().get(s_, s_)} {a_}"
+                                   + (f"-{b_}" if b_ != a_ else "")), reply_markup=kb)
             elif reply and text and (reply.get("text") or "").startswith("📝"):
                 from .edit import parse_edits
                 m = ID_RE.search(reply.get("text") or "")
@@ -624,12 +831,23 @@ def main(argv=None):
         log.info("sent %d videos for review", send(cfg))
     else:
         rerun = poll(cfg)
-        log.info("poll done, rerun daily: %s, generate: %s", rerun, GENERATE["n"])
+        log.info("poll done, rerun daily: %s, generate: %s", rerun, GENERATE)
+        import json
+        (ROOT / ".cache").mkdir(exist_ok=True)
+        if GENERATE:            # all of this poll's requests in ONE daily.yml run (it keeps a single
+            jobs, left = [], GENERATE_MAX    # pending run, so separate runs would cancel each other)
+            for g in GENERATE:
+                n = min(g["count"], left)
+                if n > 0:
+                    jobs.append({k: g.get(k, "") for k in ("theme", "reciter", "passage")} | {"count": n})
+                    left -= n
+            (ROOT / ".cache" / "generate_jobs.json").write_text(json.dumps(jobs, ensure_ascii=False),
+                                                                 encoding="utf-8")
         out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as f:
                 f.write(f"rerun={'true' if rerun else 'false'}\n")
-                f.write(f"generate={min(GENERATE['n'], GENERATE_MAX) or ''}\n")
+                f.write(f"generate={'true' if GENERATE else ''}\n")
 
 
 if __name__ == "__main__":

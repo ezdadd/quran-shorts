@@ -41,7 +41,8 @@ def pick_reciter(cfg, rng: random.Random) -> str:
 
 def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dict,
                    dry_run: bool, force_category: str | None = None,
-                   force_reciter: str | None = None, force_passage: str | None = None) -> list[dict]:
+                   force_reciter: str | None = None, force_passage: str | None = None,
+                   theme: str | None = None) -> list[dict]:
     out_dir = ROOT / cfg["paths"]["output"] / run_date.isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
     cutoff = (run_date - timedelta(days=cfg["quran"]["passage_cooldown_days"])).isoformat()
@@ -52,6 +53,10 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
     # from the end, so the most favoured keys sort last
     tw = cfg["quran"].get("theme_weights") or {}
     passages.sort(key=lambda p: rng.random() ** (1.0 / max(0.01, float(tw.get(p.get("theme"), 1)))))
+    if theme:                   # chosen from the /generate menu in Telegram
+        passages = [p for p in passages if p.get("theme") == theme]
+        if not passages:
+            log.error("no unused passages left for theme %s", theme)
     if force_passage:
         s, rngs = force_passage.split(":")
         a, _, b = rngs.partition("-")
@@ -175,6 +180,7 @@ def main(argv=None):
     ap.add_argument("--category", help="force one footage category (testing)")
     ap.add_argument("--reciter", help="force one reciter id from config (testing)")
     ap.add_argument("--passage", help="force one passage, e.g. 93:3-5 (testing)")
+    ap.add_argument("--theme", help="only passages of this theme (quran.theme_weights key)")
     ap.add_argument("--no-publish", action="store_true", help="generate only, schedule nothing")
     ap.add_argument("--date", type=date.fromisoformat, default=None, help="default: today in Cairo")
     ap.add_argument("--top-up", action="store_true",
@@ -201,7 +207,11 @@ def main(argv=None):
         log.info("top-up %s: %d usable already, generating %d", args.date, have, n)
 
     results = generate_quran(cfg, n, args.date, rng, history, args.dry_run, args.category,
-                             args.reciter, args.passage)
+                             args.reciter, args.passage, args.theme or None)
+    if args.passage and not results and not args.dry_run:
+        from .publish import notify     # a passage you picked in /generate could not be made
+        notify.send(f"⚠️ الآيات {args.passage} متعملتش: غالبًا أطول من دقيقة بالتلاوة دي. "
+                    "اختار آيات أقل أو شيخ تاني من /generate.")
     if args.dry_run:
         log.info("dry-run: %d videos in output/%s — nothing published, history not saved",
                  len(results), args.date.isoformat())
