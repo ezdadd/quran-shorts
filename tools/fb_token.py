@@ -52,7 +52,8 @@ def main():
         sys.exit("no Pages found — did you grant pages_show_list and pick the Page?")
     for i, pg in enumerate(pages):
         print(f"[{i}] {pg['name']} ({pg['id']})")
-    k = 0 if len(pages) == 1 else int(input("which page? "))
+    same = [i for i, pg in enumerate(pages) if pg["id"] == os.environ.get("FB_PAGE_ID")]
+    k = same[0] if same else 0 if len(pages) == 1 else int(input("which page? "))
     set_env("FB_PAGE_ID", pages[k]["id"])
     set_env("FB_PAGE_TOKEN", pages[k]["access_token"])
     print(f"saved FB_PAGE_ID and FB_PAGE_TOKEN for “{pages[k]['name']}” in .env")
