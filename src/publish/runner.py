@@ -43,8 +43,28 @@ def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
     # committed queue — they were made locally and are already hosted
     n_q = cfg["daily"].get("queue_per_day", 1)
     platforms = cfg["publishing"]["platforms"]
-    pending = [(p, r) for p, r in queue.items()
-               if _ok_to_publish(r) and any(pl not in (r.get("published") or {}) for pl in platforms)]
+    reviews = review.load()
+    pending: list[tuple[Path, dict]] = []
+    blocked: set[str] = set()       # a series whose next part is still waiting for review
+    allq = queue.items()
+    first_q = {}
+    for p, r in allq:
+        sid = (r.get("series") or {}).get("id")
+        if sid:
+            first_q.setdefault(sid, r.get("queued_at", ""))
+    allq.sort(key=lambda x: (first_q.get((x[1].get("series") or {}).get("id"), x[1].get("queued_at", "")),
+                             (x[1].get("series") or {}).get("part", 0)))
+    for p, r in allq:
+        sid = (r.get("series") or {}).get("id")
+        done = not any(pl not in (r.get("published") or {}) for pl in platforms)
+        if review.is_rejected(r, reviews) or done:
+            continue
+        if sid and sid in blocked:
+            continue
+        if _ok_to_publish(r, reviews):
+            pending.append((p, r))
+        elif sid:
+            blocked.add(sid)        # parts go out strictly in order
     items += pending[:n_q]
     return items
 
@@ -109,6 +129,17 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             notify.send("مشاكل في النشر:\n" + "\n".join(errors))
         return {"scheduled": 0, "errors": errors}
     rng.shuffle(items)
+    # parts of a series keep their order among themselves (times are handed out ascending)
+    sidx: dict[str, list[int]] = {}
+    for i, (_, r) in enumerate(items):
+        if r.get("series"):
+            sidx.setdefault(r["series"]["id"], []).append(i)
+    for pos in sidx.values():
+        ordered = sorted((items[i] for i in pos), key=lambda x: x[1]["series"]["part"])
+        for i, it in zip(pos, ordered):
+            items[i] = it
+    series_off: dict[str, dict] = {}
+    series_base: dict[str, datetime] = {}
     try:
         times = scheduler.base_times(cfg, rng, len(items), day)
     except ValueError as e:          # approved too late in the day — no window left
@@ -127,7 +158,15 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             except Exception as e:
                 errors.append(str(e))
                 continue
+        sid = (r.get("series") or {}).get("id")
+        if sid and sid in series_base:      # next part follows the previous one closely
+            base = series_base[sid] + timedelta(minutes=rng.randint(25, 45), seconds=rng.randint(0, 59))
+        if sid:
+            series_base[sid] = base
         when = scheduler.platform_times(cfg, rng, base, platforms)
+        if sid:     # same per-platform offsets for every part -> order holds on each platform
+            off = series_off.setdefault(sid, {pl: when[pl] - base for pl in when})
+            when = {pl: base + off[pl] for pl in when}
         pub = r.setdefault("published", {})
         line = f"{r['id']}: " + ", ".join(f"{pl} {when[pl].astimezone(tz):%H:%M}" for pl in platforms
                                          if pl not in pub)

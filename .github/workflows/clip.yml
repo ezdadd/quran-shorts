@@ -19,7 +19,7 @@ concurrency:
 jobs:
   clip:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 100   # a 10-part series: ~10 min transcription + ~3 min per part
     env:
       PYTHONIOENCODING: utf-8
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.browsers

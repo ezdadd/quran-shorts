@@ -29,7 +29,7 @@ log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
-ID_RE = re.compile(r"\b([ql]-[\w-]+?-\d{2,4})\b")
+ID_RE = re.compile(r"🆔\s*([\w-]+)")
 STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك"}
 
 
@@ -37,11 +37,13 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
 • وقت: 1:20-2:05
 • سطر: الشيخ محمد متولي الشعراوي
 • سطر: عنوان: الرزق
-• عدد: 5 مقاطع (لو مفيش وقت محدد — الفيديو الطويل بيطلع منه 3 تلقائي)
+• الفيديو الأطول من دقيقة بيتقسم أجزاء ورا بعض (الجزء 1، 2، ...) وتوافق عليهم مرة واحدة
+• عدد: 3 مقاطع = أحسن 3 لحظات بس بدل التقسيم
 هاخد الصوت بس وأركبه على فيديو طبيعة بترجمة، ويوصلك هنا للمراجعة.
 
 ✅ / ❌ تحت أي فيديو = موافقة / رفض
 ↩️ رد على فيديو بـ #وسم1 #وسم2 أو +#وسم -#وسم لتعديل الهاشتاجات
+📝 رد على رسالة «نص الترجمة» بـ  3: النص الصح  أو  5: حذف  لتعديل الكلام اللي على الفيديو
 /status حالة الفيديوهات"""
 
 
@@ -100,6 +102,8 @@ def _caption(r: dict, reviews: dict) -> str:
     head = f"🗓 {r.get('date', '')}   🆔 {r['id']}"
     if r.get("kind") == "clip":
         head += "\n🎙 مقطع من لينك" + (f" · {r['sheikh_name']}" if r.get("sheikh_name") else "")
+        if r.get("series"):
+            head += f"\n📚 الجزء {r['series']['part']} من {r['series']['of']}"
         kinds = {f.get("type") for f in r.get("flags") or []}
         if "quran" in kinds:
             head += "\n📖 فيه آية — اتعرضت بالنص الموثّق"
@@ -183,8 +187,36 @@ def send_one(cfg, path: Path) -> None:
                   chat_id=owner(), caption=_caption(r, store.load()), supports_streaming="true",
                   width=1080, height=1920, reply_markup=_kb(r["id"], None))
     r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner()}
+    if r.get("kind") == "clip":
+        from .edit import numbered_text
+        t = api("sendMessage", chat_id=owner(), text=numbered_text(r), reply_to_message_id=msg["message_id"])
+        r["telegram"]["text_msg_id"] = t["message_id"]
     write_json(path, r)
     log.info("sent %s for review", r["id"])
+
+
+def series_records(sid: str) -> list[tuple[Path, dict]]:
+    out = [(p, read_json(p, {})) for p in (ROOT / "queue").glob(f"{sid}-p*.json")]
+    return sorted(out, key=lambda x: (x[1].get("series") or {}).get("part", 0))
+
+
+def _series_kb(sid: str, n: int) -> str:
+    import json
+    return json.dumps({"inline_keyboard": [[{"text": f"✅ موافقة على الكل ({n})", "callback_data": f"A:{sid}"},
+                                            {"text": "❌ رفض الكل", "callback_data": f"R:{sid}"}]]})
+
+
+def send_series_summary(cfg, queued: list[Path]) -> None:
+    recs = [read_json(q, {}) for q in queued]
+    ser = [r for r in recs if r.get("series")]
+    if not ser:
+        return
+    sid, n = ser[0]["series"]["id"], ser[0]["series"]["of"]
+    note = "\n⚠️ الفيديو أطول من الحد، فاتعمل أول جزء منه بس." if ser[0]["series"].get("truncated") else ""
+    api("sendMessage", chat_id=owner(), reply_markup=_series_kb(sid, n),
+        text=f"📚 سلسلة {sid}: {n} أجزاء ورا بعض (الجزء 1 → {n}).\n"
+             f"وافق على الكل مرة واحدة من هنا، أو على كل جزء لوحده.\n"
+             f"هتتنشر بالترتيب، وأي جزء مرفوض بيتشال من السلسلة.{note}")
 
 
 # --------------------------------------------------------------------------- poll (hourly)
@@ -245,6 +277,30 @@ def poll(cfg) -> bool:
             if str(cq["from"]["id"]) != me and str(cq["message"]["chat"]["id"]) != me:
                 continue
             action, vid = cq["data"].split(":", 1)
+            if action in ("A", "R"):            # a whole series at once
+                status = "approved" if action == "A" else "rejected"
+                parts = series_records(vid)
+                for p_, r_ in parts:
+                    store.set_status(reviews, r_["id"], status, by=cq["from"].get("username", ""))
+                    tg = r_.get("telegram") or {}
+                    if tg.get("message_id"):
+                        try:
+                            api("editMessageCaption", chat_id=me, message_id=tg["message_id"],
+                                caption=_caption(r_, reviews), reply_markup=_kb(r_["id"], status))
+                        except TelegramError:
+                            pass
+                rerun = rerun or status == "approved"
+                try:
+                    api("editMessageText", chat_id=cq["message"]["chat"]["id"], message_id=cq["message"]["message_id"],
+                        text=f"📚 سلسلة {vid}: " + ("✅ اتوافق على كل الأجزاء — هتتنشر بالترتيب"
+                                                   if status == "approved" else "❌ اترفضت كلها"))
+                except TelegramError:
+                    pass
+                try:
+                    api("answerCallbackQuery", callback_query_id=cq["id"], text="تم")
+                except TelegramError:
+                    pass
+                continue
             path, r = _record(vid)
             status = {"a": "approved", "r": "rejected", "u": None}[action]
             if status:
@@ -300,6 +356,20 @@ def poll(cfg) -> bool:
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                     text=f"✅ استلمت{when}. هاخد الصوت بس وأركبه على فيديو من عندنا بترجمة، "
                          "وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
+            elif reply and text and (reply.get("text") or "").startswith("📝"):
+                from .edit import parse_edits
+                m = ID_RE.search(reply.get("text") or "")
+                edits = parse_edits(text)
+                if not m or not edits:
+                    api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                        text="اكتب رقم السطر وبعده النص الصح، سطر لكل تعديل. مثال:\n3: النص الصح\n5: حذف")
+                    continue
+                vid = m.group(1)
+                reviews.get(vid, {}).pop("status", None)      # edited -> needs a fresh look
+                clip_requests.append({"id": f"edit-{msg['message_id']}", "edit": vid, "edits": edits,
+                                      "msg_id": msg["message_id"]})
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text=f"✏️ استلمت {len(edits)} تعديل. هتوصلك النسخة الجديدة هنا خلال حوالي 10 دقايق.")
             elif reply and text:
                 m = ID_RE.search(reply.get("caption") or reply.get("text") or "")
                 path, r = _record(m.group(1)) if m else (None, {})
