@@ -7,13 +7,27 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 
-def _windows(cfg, day: date, tz: ZoneInfo) -> list[tuple[datetime, datetime]]:
+def _windows(cfg, day: date, tz: ZoneInfo) -> list[tuple[datetime, datetime, float]]:
+    """(start, end, weight) — "20:30-22:30 x4" means weight 4; Fridays can have their own list."""
+    p = cfg["publishing"]
+    spec = p.get("friday_windows") if day.weekday() == 4 and p.get("friday_windows") else p["windows"]
     out = []
-    for w in cfg["publishing"]["windows"]:
-        a, b = w.split("-")
+    for w in spec:
+        rng_part, _, wt = w.partition(" x")
+        a, b = rng_part.strip().split("-")
         start = datetime.combine(day, time.fromisoformat(a), tz)
         end = datetime.combine(day, time.fromisoformat(b), tz)
-        out.append((start, end))
+        out.append((start, end, float(wt or 1)))
+    return out
+
+
+def _weighted_pick(rng: random.Random, weights: list[float], k: int) -> list[int]:
+    """k distinct indices, more likely the heavier ones (k <= len)."""
+    idx, w, out = list(range(len(weights))), list(weights), []
+    for _ in range(k):
+        i = rng.choices(range(len(idx)), weights=w)[0]
+        out.append(idx.pop(i))
+        w.pop(i)
     return out
 
 
@@ -35,15 +49,17 @@ def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None 
     now = (now or datetime.now(tz)).astimezone(tz)
     earliest = now + timedelta(minutes=p["min_lead_minutes"])
     gap = timedelta(minutes=p["min_gap_minutes"])
-    wins = [(max(s, earliest), e) for s, e in _windows(cfg, day, tz) if e > earliest]
+    wins3 = [(max(s, earliest), e, w) for s, e, w in _windows(cfg, day, tz) if e > earliest]
+    wins = [(s, e) for s, e, _ in wins3]
+    weights = [w for _, _, w in wins3]
     if n == 0:
         return []
     if not wins:
         raise ValueError(f"no publishing window left on {day} after {earliest:%H:%M}")
     for attempt in range(500):
         # one window per video when possible, otherwise reuse windows
-        picks = sorted(rng.sample(range(len(wins)), n)) if n <= len(wins) else \
-            sorted(rng.choices(range(len(wins)), k=n))
+        picks = sorted(_weighted_pick(rng, weights, n)) if n <= len(wins) else \
+            sorted(rng.choices(range(len(wins)), weights=weights, k=n))
         times = [_rand_minute(rng, *wins[i]) for i in picks]
         if any(t is None for t in times):
             continue
