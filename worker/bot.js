@@ -63,6 +63,7 @@ async function telegram(req, env, ctx) {
                         { expirationTtl: 7 * 86400 });
   if (cq) {
     const note = cq.data === "g:que" ? "📊 ثواني وتوصلك الأرقام" :
+                 cq.data.startsWith("f:") ? "🤖 المصحح بدأ — النسخة المصححة هتوصلك خلال دقايق" :
                  isFinal(cq.data) ? "اتسجل ✅ — بيبدأ خلال دقيقة" : "اتسجل ✅ — ثواني ويتحدث";
     ctx.waitUntil(tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: note }));
     if (isFinal(cq.data) && cq.data !== "g:que")

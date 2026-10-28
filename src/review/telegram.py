@@ -286,6 +286,8 @@ def _kb(video_id: str, status: str | None) -> str:
     else:
         rows = [[{"text": "✅ موافقة", "callback_data": f"a:{video_id}"},
                  {"text": "❌ رفض وبدّل", "callback_data": f"r:{video_id}"}]]
+        if video_id.startswith(("c-", "l-")):      # spoken clips: run the correction agent now
+            rows[0].insert(1, {"text": "🤖 صحّح", "callback_data": f"f:{video_id}"})
     return json.dumps({"inline_keyboard": rows})
 
 
@@ -714,6 +716,18 @@ def poll(cfg) -> bool:
                     pass
                 try:
                     api("answerCallbackQuery", callback_query_id=cq["id"], text="تم")
+                except TelegramError:
+                    pass
+                continue
+            if action == "f":                   # 🤖 correct now (you approve afterwards)
+                state.setdefault("agent_started", {})[vid] = {
+                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "tries": 2}
+                clip_requests.append({"id": f"fix-{vid}", "autofix": vid, "manual": True})
+                api("sendMessage", chat_id=me, reply_to_message_id=cq["message"]["message_id"],
+                    text=f"🤖 المصحح بدأ على 🆔 {vid} — النسخة المصححة هتوصلك هنا خلال 5-10 دقايق "
+                         "ومعاها التعديلات. مش هيوافق لوحده: الموافقة منك.")
+                try:
+                    api("answerCallbackQuery", callback_query_id=cq["id"], text="🤖 بدأ")
                 except TelegramError:
                     pass
                 continue

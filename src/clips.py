@@ -291,21 +291,24 @@ def autofix(cfg, req: dict) -> dict:
     from .review import store
     from .review.edit import apply_edits
     vid = req["autofix"]
+    manual = bool(req.get("manual"))    # you pressed 🤖: correct now, never approve on its own
     r = _queued(vid)
     e = store.get(vid)
-    if e.get("status") or e.get("tags") is not None or r.get("edited_at") or r.get("auto"):
+    if not manual and (e.get("status") or e.get("tags") is not None or r.get("edited_at") or r.get("auto")):
         log.info("[%s] you already acted on it (or the agent did) — skipping", vid)
         return {"skipped": True}
     audio = _clip_audio(cfg, r, vid)
     res = correct(cfg, r, audio)
-    log.info("[%s] agent: %s, confidence %s, %d edits, dropped %s, tools %s", vid, res["decision"],
-             res["confidence"], len(res["edits"]), res["dropped"], res["tool_calls"])
-    r["auto"] = {"status": "approved" if res["decision"] == "approve" else "held",
+    res["manual"] = manual
+    log.info("[%s] agent (%s): %s, confidence %s, %d edits, dropped %s, tools %s", vid,
+             "on request" if manual else "timer", res["decision"], res["confidence"], len(res["edits"]),
+             res["dropped"], res["tool_calls"])
+    r["auto"] = {"status": "fixed" if manual else "approved" if res["decision"] == "approve" else "held",
                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  "confidence": res["confidence"], "summary": res["summary"], "why": res["why"],
                  "changes": res["changes"], "dropped": res["dropped"], "locked": res["locked"]}
     res["rerendered"] = False
-    if res["edits"] and res["decision"] == "approve":
+    if res["edits"] and (manual or res["decision"] == "approve"):   # on request: you review it anyway
         apply_edits(r, res["edits"])
         res["queue"], res["old_tg"] = _rerender(cfg, r, vid, audio, stamp="auto_edited_at")
         res["rerendered"] = True
@@ -322,7 +325,10 @@ def _agent_report(vid: str, res: dict) -> str:
     lines = [f"🤖 المصحح راجع 🆔 {vid} (ثقة: {res['confidence']})"]
     if res.get("summary"):
         lines.append(res["summary"])
-    if res["decision"] == "approve":
+    if res.get("manual"):
+        lines.append("👀 النسخة المصححة فوق — راجعها ووافق ✅ أو ارفض ❌ (مش هيتوافق عليها لوحدها)."
+                     + (f"\n⚠️ خد بالك: {res['why']}" if res["why"] else ""))
+    elif res["decision"] == "approve":
         lines.append("✅ اتوافق عليه تلقائيًا — لسه تقدر ترفضه بـ ❌ قبل ما يتنشر.")
     else:
         lines.append(f"⏸ مستنيك: {res['why']}")
@@ -332,7 +338,7 @@ def _agent_report(vid: str, res: dict) -> str:
         for c in res["changes"]:
             lines.append(f"{c['line']}: {c['new'] if c['new'] is not None else 'حذف'}" +
                          (f"   ← كان: {c['old']}" if res["rerendered"] else ""))
-    elif res["decision"] == "approve":
+    elif res["decision"] == "approve" or res.get("manual"):
         lines.append("مفيش أخطاء في الترجمة.")
     if res["dropped"]:
         lines.append("\n🔒 " + " · ".join(res["dropped"]))
