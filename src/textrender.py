@@ -28,9 +28,15 @@ html,body{margin:0;padding:0;background:transparent;width:1080px;height:1920px;o
       box-sizing:border-box;width:1000px;padding:46px 50px;border-radius:44px;word-spacing:.1em}
 .card.band{background:linear-gradient(180deg,rgba(8,10,14,.64),rgba(8,10,14,.52));
       box-shadow:inset 0 0 0 2px rgba(242,210,122,.40),0 18px 50px rgba(0,0,0,.35)}
+/* frame: thin gold rules above and below over a soft dark wash */
+.card.frame{border-radius:6px;background:radial-gradient(ellipse at center,rgba(6,8,12,.62),rgba(6,8,12,.38) 70%,rgba(6,8,12,.18));
+      border-top:2px solid rgba(242,210,122,.85);border-bottom:2px solid rgba(242,210,122,.85)}
+/* ribbon: an edge-to-edge strip across the whole screen */
+.card.ribbon{width:1080px;border-radius:0;padding-left:60px;padding-right:60px;
+      background:linear-gradient(180deg,rgba(0,0,0,.35),rgba(0,0,0,.66) 18%,rgba(0,0,0,.66) 82%,rgba(0,0,0,.35))}
 /* dark outline painted under the fill: letters stay crisp on any footage */
 .w,.m{paint-order:stroke fill;-webkit-text-stroke:.05em rgba(0,0,0,.55)}
-.card.band .w,.card.band .m{text-shadow:0 3px 8px rgba(0,0,0,.6)}
+.card.band .w,.card.band .m,.card.frame .w,.card.frame .m,.card.ribbon .w,.card.ribbon .m{text-shadow:0 3px 8px rgba(0,0,0,.6)}
 .card.shadow .w,.card.shadow .m{text-shadow:0 2px 4px rgba(0,0,0,.95),0 0 26px rgba(0,0,0,.75)}
 .card.soft .w,.card.soft .m{text-shadow:0 2px 6px rgba(0,0,0,.8),0 0 18px rgba(0,0,0,.5)}
 .w.todo{opacity:.72}

@@ -42,6 +42,40 @@ class Frame:
 
 
 # ---------------------------------------------------------------- background
+LETTERBOX = 96
+# cinematic colour grades (FFmpeg filters applied to the footage only — never to the text)
+GRADES = {
+    "none": [],
+    "warm": ["colorbalance=rs=.06:gs=.02:bs=-.06:rm=.04:bm=-.04", "eq=saturation=1.06"],
+    "cool": ["colorbalance=rs=-.05:bs=.06:rm=-.03:bm=.04", "eq=saturation=1.03"],
+    "teal_orange": ["colorbalance=rs=-.08:gs=-.02:bs=.10:rh=.10:gh=.03:bh=-.08",
+                    "eq=contrast=1.08:saturation=1.12"],
+    "golden": ["colorbalance=rm=.08:gm=.03:bm=-.08:rh=.06:bh=-.05", "eq=gamma=1.04:saturation=1.08"],
+    "moody": ["eq=contrast=1.12:saturation=0.78:brightness=-0.03", "colorbalance=bs=.05:bm=.02",
+              "curves=master='0/0 0.25/0.19 0.75/0.80 1/1'"],
+    "film": ["curves=master='0/0.06 0.5/0.5 1/0.94'", "colorbalance=rm=.04:bm=-.03", "eq=saturation=0.9"],
+    "dusk": ["colorbalance=rs=.06:bs=.08:rm=.05:bm=.04:rh=.06", "eq=saturation=1.05"],
+    "bw": ["hue=s=0", "eq=contrast=1.12"],
+}
+
+
+def look_filters(tpl: Template, total: float) -> list[str]:
+    """Camera move + colour grade + vignette as one comma-joined FFmpeg chain."""
+    post = []
+    camera = getattr(tpl, "camera", None) or ("zoom_in" if tpl.ken_burns else "still")
+    z = 0.08
+    if camera == "zoom_in":
+        post.append(f"scale=w='2*trunc({W}*(1+{z}*t/{total:.3f})/2)':h=-2:eval=frame,crop={W}:{H}")
+    elif camera == "zoom_out":
+        post.append(f"scale=w='2*trunc({W}*(1+{z}*(1-t/{total:.3f}))/2)':h=-2:eval=frame,crop={W}:{H}")
+    elif camera == "pan":     # slow sideways drift across a slightly enlarged frame
+        post.append(f"scale={int(W * 1.14) // 2 * 2}:-2,crop={W}:{H}:x='(iw-ow)*t/{total:.3f}':y=(ih-oh)/2")
+    post += GRADES.get(tpl.grade, [])
+    if tpl.vignette:
+        post.append("vignette=PI/5")
+    return post or ["null"]
+
+
 def build_background(cfg, clips: list[Clip], total: float, tpl: Template, out: Path) -> Path:
     # cycle clips until they cover the duration (crossfades eat XFADE per joint)
     segs: list[tuple[Clip, float]] = []
@@ -70,18 +104,21 @@ def build_background(cfg, clips: list[Clip], total: float, tpl: Template, out: P
         fc.append(f"[{last}][s{k}]xfade=transition=fade:duration={XFADE}:offset={offset:.3f}[x{k}]")
         last = f"x{k}"
 
-    post = []
-    if tpl.ken_burns:
-        z = 0.08
-        post.append(f"scale=w='2*trunc({W}*(1+{z}*t/{total:.3f})/2)':h=-2:eval=frame,crop={W}:{H}")
-    if tpl.grade == "warm":
-        post.append("colorbalance=rs=.06:gs=.02:bs=-.06:rm=.04:bm=-.04,eq=saturation=1.06")
-    elif tpl.grade == "cool":
-        post.append("colorbalance=rs=-.05:bs=.06:rm=-.03:bm=.04,eq=saturation=1.03")
-    if tpl.vignette:
-        post.append("vignette=PI/5")
-    post.append(f"trim=0:{total:.3f},setpts=PTS-STARTPTS,format=yuv420p")
-    fc.append(f"[{last}]" + ",".join(post) + "[bg]")
+    fc.append(f"[{last}]" + ",".join(look_filters(tpl, total)) + "[lk]")
+    last = "lk"
+    if getattr(tpl, "bloom", False):     # soft glow: a blurred copy screened over the image
+        # blend in RGB: "screen" on YUV planes shifts the chroma (everything turns purple)
+        fc.append(f"[{last}]format=gbrp,split[bl0][bl1];[bl1]gblur=sigma=26[bl2];"
+                  f"[bl0][bl2]blend=all_mode=screen:all_opacity=0.24,format=yuv420p[blm]")
+        last = "blm"
+    fin = []
+    if getattr(tpl, "grain", False):
+        fin.append("noise=alls=7:allf=t+u")
+    if getattr(tpl, "letterbox", False):
+        fin.append(f"drawbox=x=0:y=0:w=iw:h={LETTERBOX}:color=black:t=fill,"
+                   f"drawbox=x=0:y=ih-{LETTERBOX}:w=iw:h={LETTERBOX}:color=black:t=fill")
+    fin.append(f"trim=0:{total:.3f},setpts=PTS-STARTPTS,format=yuv420p")
+    fc.append(f"[{last}]" + ",".join(fin) + "[bg]")
 
     run_ffmpeg([*args, "-filter_complex", ";".join(fc), "-map", "[bg]", "-an",
                 "-c:v", "libx264", "-preset", cfg["video"]["preset"], "-crf", "16",
@@ -137,6 +174,10 @@ def _paginate(tr: TextRenderer, a: quran.Ayah, kw: dict, max_lines: int) -> list
     return list(zip(breaks, breaks[1:]))
 
 
+CSS_STYLE = {"band": "band", "frame": "frame", "ribbon": "ribbon", "shadow": "shadow", "blur": "soft",
+             "dim": "soft"}
+
+
 def build_text_frames(tr: TextRenderer, cfg, rec: quran.Recitation, tpl: Template,
                       color: str, style: str, lead: float, total: float) -> tuple[list[Frame], tuple]:
     tcfg = cfg["templates"]
@@ -144,7 +185,7 @@ def build_text_frames(tr: TextRenderer, cfg, rec: quran.Recitation, tpl: Templat
     tr.use_fonts(f["file"])
     hexcol = tcfg["colors"][color]
     accent = tcfg["colors"]["gold"] if color != "gold" else "#FFFFFF"
-    css_style = {"band": "band", "shadow": "shadow", "blur": "soft", "dim": "soft"}[style]
+    css_style = CSS_STYLE[style]
     kw = dict(style=css_style, color=hexcol, accent=accent, size=f["size"],
               center_y=CENTER_Y[tpl.position], attach_marks=f.get("attach_marks", False),
               weight=f.get("css_weight", 400), min_size=tcfg.get("min_size", 64))
@@ -195,13 +236,22 @@ def build_text_frames(tr: TextRenderer, cfg, rec: quran.Recitation, tpl: Templat
     return frames, (int(x0), int(y0), int(x1), int(y1))
 
 
-def _scaled(img: Image.Image, k: float) -> Image.Image:
+def _scaled(img: Image.Image, k: float, rise: int = 0) -> Image.Image:
     r, g, b, a = img.split()
-    return Image.merge("RGBA", (r, g, b, a.point(lambda v: int(v * k))))
+    out = Image.merge("RGBA", (r, g, b, a.point(lambda v: int(v * k))))
+    if rise:                  # entering text sits a little lower and glides up into place
+        moved = Image.new("RGBA", out.size, (0, 0, 0, 0))
+        moved.paste(out, (0, rise))
+        out = moved
+    return out
 
 
-def write_concat(frames: list[Frame], total: float, work: Path) -> Path:
-    """Expand states into PNG frames with fade in/out per screen and write an ffconcat list."""
+RISE_PX = 22
+
+
+def write_concat(frames: list[Frame], total: float, work: Path, entrance: str = "fade") -> Path:
+    """Expand states into PNG frames with fade in/out per screen and write an ffconcat list.
+    entrance="rise" also slides each new screen up into place while it fades in."""
     d = work / "text"
     d.mkdir(exist_ok=True)
     blank = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -221,7 +271,9 @@ def write_concat(frames: list[Frame], total: float, work: Path) -> Path:
             n_in = n_out = 0
             body = e - s
         for i in range(n_in):
-            entries.append((_scaled(fr.image, (i + 1) / (n_in + 1)), step))
+            k = (i + 1) / (n_in + 1)
+            rise = round(RISE_PX * (1 - k) ** 2) if entrance == "rise" else 0
+            entries.append((_scaled(fr.image, k, rise), step))
         entries.append((fr.image, body))
         for i in range(n_out):
             entries.append((_scaled(fr.image, 1 - (i + 1) / (n_out + 1)), step))
@@ -270,7 +322,7 @@ def compose(cfg, rng: random.Random, tr: TextRenderer, rec: quran.Recitation, cl
     log.info("text zone luma %.2f -> colour %s, backing %s", luma, color, style)
 
     frames, box = build_text_frames(tr, cfg, rec, tpl, color, style, lead, total)
-    concat = write_concat(frames, total, work)
+    concat = write_concat(frames, total, work, getattr(tpl, "entrance", "fade"))
 
     labels = []
     if tpl.show_title:
@@ -287,7 +339,8 @@ def compose(cfg, rng: random.Random, tr: TextRenderer, rec: quran.Recitation, cl
                        "pill": True})
     labels_png = None
     if labels:
-        tr.use_fonts(cfg["templates"]["fonts"][tpl.font]["file"])
+        tr.use_fonts(cfg["templates"]["fonts"][tpl.font]["file"],
+                     label_font=getattr(tpl, "label_font", None) or "Amiri-Regular.ttf")
         labels_png = work / "_labels.png"
         tr.labels(labels).save(labels_png)
 

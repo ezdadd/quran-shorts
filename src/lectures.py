@@ -24,7 +24,7 @@ from PIL import Image
 
 from . import asr, quran
 from .align import norm
-from .render import FPS, H, W, Frame, write_concat
+from .render import CSS_STYLE, FPS, H, W, Frame, write_concat
 from .textrender import TextRenderer
 from .util import (FFPROBE, ROOT, cache_dir, http_json, load_config, read_json, run_ffmpeg,
                    setup_logging, write_json)
@@ -195,8 +195,8 @@ def build_segments(cfg, words: list[dict], clip: dict) -> tuple[list[dict], list
         if line:
             segs.append({"type": "speech", "start": round(line[0]["s"] - t0, 3),
                          "end": round(line[-1]["e"] - t0, 3),
-                         "words": [{"w": w["w"], "s": round(w["s"] - t0, 3), "e": round(w["e"] - t0, 3)}
-                                   for w in line],
+                         "words": [{"w": w["w"], "s": round(w["s"] - t0, 3), "e": round(w["e"] - t0, 3),
+                                    "p": w.get("p")} for w in line],
                          "text": " ".join(w["w"] for w in line)})
             line.clear()
 
@@ -236,23 +236,27 @@ SUB_FONT = "NotoNaskhArabic[wght].ttf"
 QURAN_FONT = "ScheherazadeNew-Bold.ttf"
 
 
-def text_frames(tr: TextRenderer, cfg, segs: list[dict], center_y: int, total: float) -> list[Frame]:
+def text_frames(tr: TextRenderer, cfg, segs: list[dict], center_y: int, total: float,
+                sub: dict | None = None, style: str = "band", label_font: str = "Amiri-Regular.ttf") -> list[Frame]:
+    """sub = the subtitle font entry from templates.sub_fonts ({file, size, css_weight})."""
+    sub = sub or {"file": SUB_FONT, "size": 70, "css_weight": 700}
     frames: list[Frame] = []
     kw = dict(color="#FFFFFF", accent="#F2D27A", center_y=center_y, max_h=330, min_size=52,
               open_bracket=False, close_bracket=False)
     for seg in segs:
         if seg["type"] == "quran":
-            tr.use_fonts(QURAN_FONT)
-            info = tr.layout_ayah(seg["words"], None, style="band", size=68, **{**kw, "color": "#F2D27A",
+            tr.use_fonts(QURAN_FONT, label_font=label_font)
+            info = tr.layout_ayah(seg["words"], None, style=style, size=68, **{**kw, "color": "#F2D27A",
                                   "open_bracket": True, "close_bracket": True, "max_h": 420})
             fr = Frame(tr.state(info).image, seg["start"], seg["end"] + 0.3)
             fr.fade_in = fr.fade_out = True
             frames.append(fr)
             continue
-        tr.use_fonts(SUB_FONT)
+        tr.use_fonts(sub["file"], label_font=label_font)
         edited = seg["text"].strip() != " ".join(w["w"] for w in seg["words"])
         disp = seg["text"].split() if edited else [w["w"] for w in seg["words"]]
-        info = tr.layout_ayah(disp, None, style="band", size=70, weight=700, **kw)
+        info = tr.layout_ayah(disp, None, style=style, size=sub.get("size", 70),
+                              weight=sub.get("css_weight", 400), **kw)
         if edited:   # user changed the text: show the line whole for its duration
             frames.append(Frame(tr.state(info).image, seg["start"], seg["end"]))
             continue
@@ -301,6 +305,12 @@ def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
     work = cache_dir(cfg, "work", rec["id"])
     is_video = src.suffix.lower() in VIDEO_EXT
     layout = rec["layout"]
+    # one random look per clip, saved in the record so a re-render (subtitle edit) keeps it
+    from .templates import Template, choose_clip
+    if not rec.get("look"):
+        rec["look"] = choose_clip(cfg, random.Random(rec["id"])).to_dict()
+    tpl = Template(**rec["look"])
+    sub = (cfg["templates"].get("sub_fonts") or {}).get(tpl.font)
 
     # ---- video base
     args = ["-ss", f"{start:.3f}", "-t", f"{total:.3f}", "-i", str(src)]
@@ -320,12 +330,10 @@ def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
         # audio-only lecture: calm nature footage + waveform
         from . import footage
         from .render import build_background
-        from .templates import Template
         rng = random.Random(rec["id"])
         cat = footage.pick_category(cfg, rng)
         clips = footage.get_clips(cfg, cat, total, {}, rng)
-        bg = build_background(cfg, clips, total, Template("noto_naskh", "center", "dim", "word", "none",
-                                                          "white", True, True, False, False), work / "bg.mp4")
+        bg = build_background(cfg, clips, total, tpl, work / "bg.mp4")
         args = ["-i", str(bg)] + args
         fc.append(f"[1:a]asplit[aw][am];[aw]showwaves=s={W}x220:mode=cline:rate={FPS}:colors=white@0.55,format=rgba[wv];"
                   f"[0:v]colorchannelmixer=rr=.6:gg=.6:bb=.6[dk];[dk][wv]overlay=0:820[base]")
@@ -334,9 +342,10 @@ def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
     a_src = "[am]" if not is_video else "[0:a]"
 
     # ---- text layers
-    frames = text_frames(tr, cfg, rec["segments"], sub_y, total)
-    concat = write_concat(frames, total, work)
-    tr.use_fonts(SUB_FONT)
+    frames = text_frames(tr, cfg, rec["segments"], sub_y, total, sub,
+                         CSS_STYLE.get(tpl.background, "band"), tpl.label_font)
+    concat = write_concat(frames, total, work, tpl.entrance)
+    tr.use_fonts((sub or {}).get("file", SUB_FONT), label_font=tpl.label_font)
     b = cfg.get("branding", {})
     labels = [{"text": rec["title"], "y": 120, "size": 50}] if rec.get("title") else []
     labels += [{"text": rec["sheikh_name"], "y": b.get("y", 1735) - 75, "size": 42},

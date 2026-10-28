@@ -57,7 +57,11 @@ def is_rejected(r: dict, reviews: dict) -> bool:
 
 
 def is_approved(r: dict, reviews: dict) -> bool:
-    return bool(r.get("approved")) or get(r["id"], reviews).get("status") == "approved"
+    """Your ✅, or the correction agent's approval when you haven't decided anything yourself
+    (any status of yours — including ↩️ "waiting" — overrides the agent)."""
+    st = get(r["id"], reviews).get("status")
+    return bool(r.get("approved")) or st == "approved" or \
+        (st is None and (r.get("auto") or {}).get("status") == "approved")
 
 
 def final_caption(r: dict, platform: str, reviews: dict) -> str:

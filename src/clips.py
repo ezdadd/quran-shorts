@@ -224,24 +224,18 @@ def publish_prep(cfg, rec_path: Path) -> Path:
     return q
 
 
-def rerender_edit(cfg, req: dict) -> Path:
-    """Apply subtitle edits to a queued clip and rebuild it from its hosted MP4's audio."""
-    from .review.edit import apply_edits
-    from .util import download, read_json
-    vid = req["edit"]
-    q = QUEUE / f"{vid}.json"
-    r = read_json(q, None)
-    if r is None:
-        raise ClipError(f"مش لاقي المقطع {vid}")
-    if r.get("published"):
-        raise ClipError("المقطع ده اتجدول/اتنشر خلاص — التعديل مش هيوصل للمنصات")
-    n = apply_edits(r, req["edits"])
-    if not n:
-        raise ClipError("مفيش سطر اتعدل (اتأكد من أرقام السطور)")
+def _clip_audio(cfg, r: dict, vid: str) -> Path:
+    """The clip's own audio, taken back out of its hosted MP4 (times match the subtitles)."""
+    from .util import download
     work = cache_dir(cfg, "clips", "edit-" + vid)
     mp4 = download(r["hosting"]["url"], work / "old.mp4")
     audio = work / "audio.wav"
     run_ffmpeg(["-i", str(mp4), "-vn", "-ac", "1", "-ar", "44100", str(audio)], "extract audio")
+    return audio
+
+
+def _rerender(cfg, r: dict, vid: str, audio: Path, stamp: str = "edited_at") -> tuple[Path, dict]:
+    """Render the clip again from `audio` with r's (edited) subtitles, re-host it, re-queue it."""
     dur = media_duration(audio)
     orig_source, orig_clip = r["source"], r["clip"]
     r["source"] = {**orig_source, "file": str(audio.relative_to(ROOT)).replace("\\", "/")}
@@ -249,13 +243,90 @@ def rerender_edit(cfg, req: dict) -> Path:
     with TextRenderer(cfg) as tr:
         render_clip(cfg, r, tr)
     r["source"], r["clip"] = orig_source, orig_clip
-    r["edited_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    r[stamp] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rec_path = review_dir() / f"{vid}.json"
     old_tg = r.pop("telegram", {}) or {}
     write_json(rec_path, r)
-    newq = publish_prep(cfg, rec_path)            # re-host (same id, overwritten) + queue record
+    return publish_prep(cfg, rec_path), old_tg       # re-host (same id, overwritten) + queue record
+
+
+def _queued(vid: str) -> dict:
+    from .util import read_json
+    r = read_json(QUEUE / f"{vid}.json", None)
+    if r is None:
+        raise ClipError(f"مش لاقي المقطع {vid}")
+    if r.get("published"):
+        raise ClipError("المقطع ده اتجدول/اتنشر خلاص — التعديل مش هيوصل للمنصات")
+    return r
+
+
+def rerender_edit(cfg, req: dict) -> tuple[Path, dict]:
+    """Apply your subtitle edits (from Telegram) to a queued clip and rebuild it."""
+    from .review.edit import apply_edits
+    vid = req["edit"]
+    r = _queued(vid)
+    n = apply_edits(r, req["edits"])
+    if not n:
+        raise ClipError("مفيش سطر اتعدل (اتأكد من أرقام السطور)")
+    r.pop("auto", None)                 # you edited it: your approval decides from here
+    q, old_tg = _rerender(cfg, r, vid, _clip_audio(cfg, r, vid))
     log.info("[%s] %d subtitle lines edited, re-rendered", vid, n)
-    return newq, old_tg
+    return q, old_tg
+
+
+def autofix(cfg, req: dict) -> dict:
+    """The correction agent's turn on a clip you haven't touched for agent.delay_hours: fix the
+    subtitles, re-render if anything changed, and approve it (or hold it with the reason)."""
+    from .agent.corrector import correct
+    from .review import store
+    from .review.edit import apply_edits
+    vid = req["autofix"]
+    r = _queued(vid)
+    e = store.get(vid)
+    if e.get("status") or e.get("tags") is not None or r.get("edited_at") or r.get("auto"):
+        log.info("[%s] you already acted on it (or the agent did) — skipping", vid)
+        return {"skipped": True}
+    audio = _clip_audio(cfg, r, vid)
+    res = correct(cfg, r, audio)
+    log.info("[%s] agent: %s, confidence %s, %d edits, dropped %s, tools %s", vid, res["decision"],
+             res["confidence"], len(res["edits"]), res["dropped"], res["tool_calls"])
+    r["auto"] = {"status": "approved" if res["decision"] == "approve" else "held",
+                 "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                 "confidence": res["confidence"], "summary": res["summary"], "why": res["why"],
+                 "changes": res["changes"], "dropped": res["dropped"], "locked": res["locked"]}
+    res["rerendered"] = False
+    if res["edits"] and res["decision"] == "approve":
+        apply_edits(r, res["edits"])
+        res["queue"], res["old_tg"] = _rerender(cfg, r, vid, audio, stamp="auto_edited_at")
+        res["rerendered"] = True
+    else:                               # unchanged video (or held: edits only suggested to you)
+        write_json(QUEUE / f"{vid}.json", r)
+        local = ROOT / r.get("local_record", "")
+        if r.get("local_record") and local.exists():
+            write_json(local, r)
+        res["queue"], res["old_tg"] = QUEUE / f"{vid}.json", r.get("telegram") or {}
+    return res
+
+
+def _agent_report(vid: str, res: dict) -> str:
+    lines = [f"🤖 المصحح راجع 🆔 {vid} (ثقة: {res['confidence']})"]
+    if res.get("summary"):
+        lines.append(res["summary"])
+    if res["decision"] == "approve":
+        lines.append("✅ اتوافق عليه تلقائيًا — لسه تقدر ترفضه بـ ❌ قبل ما يتنشر.")
+    else:
+        lines.append(f"⏸ مستنيك: {res['why']}")
+    if res["changes"]:
+        verb = "اتعدل" if res["rerendered"] else "اقتراحات (رد بيها على رسالة 📝 لو موافق)"
+        lines.append(f"\n✏️ {verb}:")
+        for c in res["changes"]:
+            lines.append(f"{c['line']}: {c['new'] if c['new'] is not None else 'حذف'}" +
+                         (f"   ← كان: {c['old']}" if res["rerendered"] else ""))
+    elif res["decision"] == "approve":
+        lines.append("مفيش أخطاء في الترجمة.")
+    if res["dropped"]:
+        lines.append("\n🔒 " + " · ".join(res["dropped"]))
+    return "\n".join(lines)[:4000]
 
 
 def main(argv=None):
@@ -266,9 +337,31 @@ def main(argv=None):
     cfg = load_config()
     req = json.loads(a.req)
     import os
+    from .agent.corrector import AgentError
     from .review import telegram
     chat = telegram.owner() if os.environ.get("TELEGRAM_BOT_TOKEN") else None
     try:
+        if req.get("autofix"):
+            res = autofix(cfg, req)
+            if res.get("skipped") or not chat:
+                return
+            vid = req["autofix"]
+            old = res.get("old_tg") or {}
+            if res["rerendered"]:
+                if old.get("message_id"):
+                    try:
+                        telegram.api("editMessageCaption", chat_id=chat, message_id=old["message_id"],
+                                     caption="🤖 النسخة دي اتصححت — شوف الجديدة تحت")
+                    except telegram.TelegramError:
+                        pass
+                telegram.send_one(cfg, res["queue"])
+            elif old.get("message_id"):
+                telegram.refresh_caption(res["queue"])
+            from .util import read_json
+            tg = (read_json(res["queue"], {}).get("telegram") or {})
+            telegram.api("sendMessage", chat_id=chat, text=_agent_report(vid, res),
+                         **({"reply_to_message_id": tg["message_id"]} if tg.get("message_id") else {}))
+            return
         if req.get("edit"):
             q, old_tg = rerender_edit(cfg, req)
             if chat:
@@ -286,6 +379,12 @@ def main(argv=None):
             for q in queued:
                 telegram.send_one(cfg, q)
             telegram.send_series_summary(cfg, queued)
+    except AgentError as e:             # the agent could not finish: the clip just waits for you
+        log.error("agent: %s", e)
+        if chat:
+            telegram.api("sendMessage", chat_id=chat, text=f"🤖 المصحح مقدرش يراجع {req.get('autofix')}: {e}\n"
+                                                           "المقطع مستني موافقتك زي الأول.")
+        raise SystemExit(1)
     except ClipError as e:
         log.error("%s", e)
         if chat:

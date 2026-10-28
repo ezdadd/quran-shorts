@@ -1,12 +1,13 @@
 name: telegram-review
 
-# Every hour: read your Telegram button presses / hashtag edits / commands, save them, and —
+# Every 20 minutes: read your Telegram button presses / hashtag edits / commands, save them, and —
 # when a video for today was approved or something was rejected — run the daily workflow again
 # so today's approved videos get scheduled and rejected ones get replaced.
-# (~30 s per run → ~720 billed minutes a month; Telegram keeps unread updates for 24 h.)
+# Also starts the correction agent on clips you have not touched for agent.delay_hours.
+# (Public repo: Actions minutes are free. Telegram keeps unread updates for 24 h.)
 on:
   schedule:
-    - cron: "23 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +26,7 @@ jobs:
       PYTHONIOENCODING: utf-8
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      AGENT_KEY_SET: ${{ secrets.ANTHROPIC_API_KEY != '' }}
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
       FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
     steps:

@@ -16,7 +16,7 @@ import argparse
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,8 @@ OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
 ID_RE = re.compile(r"🆔\s*([\w-]+)")
-STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك"}
+STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك",
+          "waiting": "⏳ مستني موافقتك", "auto": "🤖 اتوافق تلقائيًا (المصحح) — تقدر ترفضه قبل النشر"}
 
 
 HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه، وممكن تضيف:
@@ -44,6 +45,9 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
 ✅ / ❌ تحت أي فيديو = موافقة / رفض
 ↩️ رد على فيديو بـ #وسم1 #وسم2 أو +#وسم -#وسم لتعديل الهاشتاجات
 📝 رد على رسالة «نص الترجمة» بـ  3: النص الصح  أو  5: حذف  لتعديل الكلام اللي على الفيديو
+🤖 لو مراجعتش مقطع لينك أو درس خلال ساعتين، المصحح بيراجع الترجمة (فصحى وعامية) ويصححها
+   ويوافق لوحده — إلا لو فيه آية أو حديث مش واضح أو مش واثق، ساعتها بيستناك. الآيات والأحاديث مش بيلمسها.
+   ↩️ أو ❌ بعدها بيلغوا موافقته.
 /status حالة الفيديوهات"""
 
 
@@ -113,7 +117,12 @@ def _caption(r: dict, reviews: dict) -> str:
             head += "\n⚠️ الترجمة فيها كلمات مش واضحة — راجعها"
     elif r.get("type") == "lecture":
         head += "\n🎙 درس"
-    s = f"{head}\n\n{cap}\n\nالحالة: {STATUS.get(e.get('status'))}"
+    st = e.get("status")
+    if st is None and (r.get("auto") or {}).get("status") == "approved":
+        st = "auto"
+    s = f"{head}\n\n{cap}\n\nالحالة: {STATUS.get(st)}"
+    if (r.get("auto") or {}).get("status") == "held" and not e.get("status"):
+        s += f"\n🤖 المصحح مستنيك: {r['auto'].get('why', '')}"
     if not e.get("status"):
         s += "\n↩️ رد على الفيديو بهاشتاجات جديدة لتعديلها (+#وسم ‎-#وسم للإضافة/الحذف)"
     return s[:1024]
@@ -186,13 +195,57 @@ def send_one(cfg, path: Path) -> None:
         msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
                   chat_id=owner(), caption=_caption(r, store.load()), supports_streaming="true",
                   width=1080, height=1920, reply_markup=_kb(r["id"], None))
-    r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner()}
+    r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner(),
+                     "sent_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     if r.get("kind") == "clip":
         from .edit import numbered_text
         t = api("sendMessage", chat_id=owner(), text=numbered_text(r), reply_to_message_id=msg["message_id"])
         r["telegram"]["text_msg_id"] = t["message_id"]
     write_json(path, r)
     log.info("sent %s for review", r["id"])
+
+
+def refresh_caption(path: Path) -> None:
+    """Re-draw a sent video's caption (after the agent approved / held it)."""
+    r = read_json(path, {})
+    tg = r.get("telegram") or {}
+    if not tg.get("message_id"):
+        return
+    reviews = store.load()
+    try:
+        api("editMessageCaption", chat_id=owner(), message_id=tg["message_id"], caption=_caption(r, reviews),
+            reply_markup=_kb(r["id"], store.get(r["id"], reviews).get("status")))
+    except TelegramError as e:
+        log.warning("refresh caption %s: %s", r["id"], e)
+
+
+def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
+    """Clips you haven't touched for agent.delay_hours -> one correction-agent job each.
+    Only lecture / link clips; Quran recitation videos never go to the agent."""
+    a = cfg.get("agent") or {}
+    if not a.get("enabled", True) or os.environ.get("AGENT_KEY_SET") == "false":
+        return []                       # no ANTHROPIC_API_KEY secret yet: clips simply wait for you
+    now = datetime.now(timezone.utc)
+    delay = timedelta(hours=float(a.get("delay_hours", 2)))
+    started = state.setdefault("agent_started", {})
+    out = []
+    for p in sorted((ROOT / "queue").glob("*.json")):
+        r = read_json(p, {})
+        if r.get("kind") != "clip" and r.get("type") != "lecture":
+            continue
+        e = store.get(r["id"], reviews)
+        if r.get("published") or r.get("auto") or r.get("edited_at") or e.get("status") \
+                or e.get("tags") is not None or not (r.get("telegram") or {}).get("message_id"):
+            continue
+        sent = (r.get("telegram") or {}).get("sent_at") or r.get("queued_at")
+        if not sent or now - datetime.fromisoformat(sent) < delay:
+            continue
+        prev = started.get(r["id"])
+        if prev and (prev.get("tries", 0) >= 2 or now - datetime.fromisoformat(prev["at"]) < timedelta(hours=3)):
+            continue                    # running now, or already failed twice
+        started[r["id"]] = {"at": now.isoformat(timespec="seconds"), "tries": (prev or {}).get("tries", 0) + 1}
+        out.append({"id": f"auto-{r['id']}", "autofix": r["id"]})
+    return out
 
 
 def series_records(sid: str) -> list[tuple[Path, dict]]:
@@ -305,8 +358,8 @@ def poll(cfg) -> bool:
             status = {"a": "approved", "r": "rejected", "u": None}[action]
             if status:
                 store.set_status(reviews, vid, status, by=cq["from"].get("username", ""))
-            else:
-                reviews.get(vid, {}).pop("status", None)
+            else:               # ↩️ = "wait for me": also cancels an approval made by the agent
+                store.set_status(reviews, vid, "waiting", by=cq["from"].get("username", ""))
             note = ""
             if status == "rejected" and r:
                 gone = _unschedule(r)
@@ -394,6 +447,7 @@ def poll(cfg) -> bool:
                                                       for i in r["published"].values()):
                     api("sendMessage", chat_id=me,
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
+    clip_requests += agent_due(cfg, reviews, state)
     store.save(reviews)
     write_json(STATE, state)
     # handed to the workflow, which starts one clip job per request

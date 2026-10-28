@@ -167,18 +167,38 @@ templates:
   # خطوط عريضة (Bold) وحجم كبير عشان الوضوح. size = الحجم المبدئي؛ الآية الطويلة بتتقسم على
   # أكتر من شاشة بدل ما الخط يصغر. max_lines = أقصى عدد سطور في الشاشة الواحدة.
   fonts:
+    scheherazade: {file: ScheherazadeNew-Bold.ttf, weight: 4, size: 96}
     noto_naskh:   {file: "NotoNaskhArabic[wght].ttf", css_weight: 700, weight: 3, size: 90}
-    scheherazade: {file: ScheherazadeNew-Bold.ttf, weight: 3, size: 96}
-    amiri:        {file: Amiri-Bold.ttf, weight: 2, size: 92, attach_marks: true}
-    amiri_quran:  {file: AmiriQuran-Regular.ttf, weight: 1, size: 96, attach_marks: true}
+    harmattan:    {file: Harmattan-Bold.ttf, weight: 2, size: 92}
+    lateef:       {file: Lateef-Bold.ttf, weight: 2, size: 112}
+    # Amiri: التشكيل بيطلع بعيد عن الحروف في الآيات — متوقف (weight 0) ومتساب للفيديوهات القديمة بس
+    amiri:        {file: Amiri-Bold.ttf, weight: 0, size: 92, attach_marks: true}
+    amiri_quran:  {file: AmiriQuran-Regular.ttf, weight: 0, size: 96, attach_marks: true}
+  # ترجمة كلام الشيوخ (مقاطع اللينكات والدروس): خط عشوائي لكل فيديو
+  sub_fonts:
+    noto_naskh: {file: "NotoNaskhArabic[wght].ttf", css_weight: 700, weight: 3, size: 70}
+    ibm_plex:   {file: IBMPlexSansArabic-Bold.ttf, weight: 3, size: 66}
+    noto_kufi:  {file: "NotoKufiArabic[wght].ttf", css_weight: 700, weight: 2, size: 62}
+    readex:     {file: "ReadexPro[HEXP,wght].ttf", css_weight: 600, weight: 2, size: 64}
+    harmattan:  {file: Harmattan-Bold.ttf, weight: 2, size: 74}
+  # خط العناوين الصغيرة (اسم السورة، القارئ، اسم القناة)
+  label_fonts: {Amiri-Regular.ttf: 3, ArefRuqaa-Bold.ttf: 2, "ReemKufi[wght].ttf": 1}
   min_size: 64
   max_lines: {center: 4, lower: 3}
   # center = نص الشاشة (أوضح مكان، بعيد عن أزرار المنصات والكابشن تحت)
   position:   {center: 5, lower: 1}
-  background: {band: 5, blur: 2, dim: 1, shadow: 1}
+  # شكل الكارت ورا النص: band = كارت غامق، frame = إطار دهبي رفيع، ribbon = شريط بعرض الشاشة
+  background: {band: 4, frame: 2, ribbon: 2, blur: 2, dim: 1, shadow: 1}
   animation:  {whole: 3, line: 2, word: 3}   # word بيشتغل بس لو توقيت الكلمات متاح
-  grade:      {none: 2, warm: 2, cool: 1}
-  ken_burns: 0.7      # احتمال الزوم البطيء
+  entrance:   {fade: 3, rise: 2}             # rise = النص بيطلع لفوق بنعومة وهو بيظهر
+  # تلوين سينمائي
+  grade:      {none: 1, warm: 2, cool: 1, teal_orange: 2, golden: 2, moody: 1, film: 2, dusk: 1, bw: 1}
+  # حركة الكاميرا على الخلفية
+  camera:     {zoom_in: 3, zoom_out: 2, pan: 2, still: 1}
+  # مؤثرات (احتمال كل واحد)
+  grain: 0.4          # حبيبات فيلم خفيفة
+  bloom: 0.3          # توهج ناعم للإضاءة
+  letterbox: 0.2      # شرايط سودا فوق وتحت (شكل سينما)
   vignette: 0.5
   show_title: 0.6     # اسم السورة ورقم الآية فوق
   show_reciter: 0.7   # اسم القارئ تحت
@@ -263,3 +283,19 @@ publishing:
   facebook_api_version: v26.0
   require_approval: true   # مفيش فيديو يتنشر غير بعد موافقتك في تيليجرام
   days_ahead: 2            # يتعمل فيديوهات النهارده + اليومين الجايين، وتستنى موافقتك
+
+# ------------------------------------------------------------
+# المصحح الذكي (Claude): لو مقطع لينك/درس فضل من غير مراجعة منك delay_hours، بيراجع الترجمة
+# (بيسمع تاني الكلمات المش واضحة)، يصححها من غير ما يغيّر لهجة الشيخ، ويوافق لوحده.
+# مش بيلمس الآيات ولا الأحاديث، وبيستناك لو فيه آية/حديث مش واضح أو مش واثق.
+# محتاج ANTHROPIC_API_KEY في .env وفي GitHub Secrets.
+# ------------------------------------------------------------
+agent:
+  enabled: true
+  delay_hours: 2
+  model: claude-opus-5-5
+  effort: high
+  auto_approve_min: medium   # high = يوافق بس لو واثق جدًا، medium = يقبل شكوك بسيطة
+  min_similarity: 0.5        # تعديل بيغيّر السطر أكتر من كدا بيتلغي (عشان ميعيدش صياغة كلام الشيخ)
+  max_relisten: 12
+  max_turns: 16

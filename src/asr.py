@@ -84,3 +84,30 @@ def transcribe(cfg, path: Path) -> list[dict]:
     log.info("transcribed %s: %.0fs audio in %.0fs", path.name, dur, time.time() - t)
     write_json(cp, {"file": str(path), "duration": dur, "words": words})
     return words
+
+
+_audio_cache: dict[str, np.ndarray] = {}
+
+
+def transcribe_slice(cfg, path: Path, start: float, end: float, prompt: str | None = None,
+                     slow: bool = False) -> dict:
+    """Listen again to one stretch of a file (the correction agent's "relisten" tool): wider beam,
+    optional context prompt (previous sentence / topic) and optional 0.85x slow-down, which helps
+    Whisper with fast colloquial speech. Returns {"text", "words": [{w, p}]}."""
+    key = str(path)
+    if key not in _audio_cache:
+        _audio_cache.clear()
+        _audio_cache[key] = _decode(path)
+    audio = _audio_cache[key]
+    a, b = max(0, int((start - 0.3) * 16000)), min(len(audio), int((end + 0.3) * 16000))
+    chunk = audio[a:b]
+    if slow and len(chunk):
+        raw = subprocess.run([FFMPEG, "-v", "error", "-f", "f32le", "-ar", "16000", "-ac", "1", "-i", "-",
+                              "-filter:a", "atempo=0.85", "-f", "f32le", "-"],
+                             input=chunk.astype(np.float32).tobytes(), capture_output=True, check=True).stdout
+        chunk = np.frombuffer(raw, np.float32)
+    model = _load_model(cfg)
+    segs, _ = model.transcribe(chunk, language="ar", word_timestamps=True, vad_filter=False, beam_size=8,
+                               condition_on_previous_text=False, initial_prompt=prompt or None)
+    words = [{"w": w.word.strip(), "p": round(w.probability, 2)} for s in segs for w in (s.words or [])]
+    return {"text": " ".join(w["w"] for w in words), "words": words}
