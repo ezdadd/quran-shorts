@@ -126,6 +126,13 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
         for pl in platforms:
             if pl == "facebook" and not fb_ok:
                 log.info("facebook: not configured / token invalid — skipped")
+                if facebook.configured():       # set up but refused: tell you (once a day)
+                    stamp = ROOT / ".cache" / f"fb_alert_{date.today()}"
+                    if not stamp.exists():
+                        stamp.parent.mkdir(exist_ok=True)
+                        stamp.touch()
+                        notify.send("⚠️ فيسبوك اتخطى في النشر: توكن الصفحة بطل يشتغل (الصلاحيات اتلغت). "
+                                    "الفيديوهات بتتنشر على باقي المنصات. جدد التوكن (python tools/fb_token.py).")
             elif pl != "facebook" and pl not in chans:
                 log.info(f"{pl}: no connected Buffer channel — skipped")
         # only platforms that can actually take a post right now; the rest are retried on the
