@@ -387,6 +387,33 @@ def quran_check(cfg, r: dict) -> str | None:
     return None
 
 
+def fixed_auto(cfg, reviews: dict) -> bool:
+    """A clip you sent to the agent with 🤖 and then didn't review for agent.delay_hours: approve it
+    — but only when the agent was confident (its decision was "approve"); otherwise it keeps
+    waiting for you. Your ✅/❌/↩️ always wins."""
+    now = datetime.now(timezone.utc)
+    delay = timedelta(hours=float((cfg.get("agent") or {}).get("delay_hours", 2)))
+    rerun = False
+    for p in sorted((ROOT / "queue").glob("*.json")):
+        r = read_json(p, {})
+        a, tg = r.get("auto") or {}, r.get("telegram") or {}
+        if a.get("status") != "fixed" or a.get("decision") != "approve" or r.get("published") \
+                or store.get(r["id"], reviews).get("status") or not tg.get("message_id"):
+            continue
+        sent = tg.get("sent_at") or a.get("at")
+        if not sent or now - datetime.fromisoformat(sent) < delay:
+            continue
+        store.set_status(reviews, r["id"], "approved", by="auto")
+        log.info("%s auto-approved after its requested correction", r["id"])
+        try:
+            api("editMessageCaption", chat_id=owner(), message_id=tg["message_id"], caption=_caption(r, reviews),
+                reply_markup=_kb(r["id"], "approved"))
+        except TelegramError:
+            pass
+        rerun = True
+    return rerun
+
+
 def quran_auto(cfg, reviews: dict, today: str) -> bool:
     """Daily Quran videos you haven't touched for publishing.auto_approve_hours: run the checks and
     approve them (or reject them, so a replacement is made). Your ✅/❌/↩️ always wins. Recordings
@@ -859,6 +886,7 @@ def poll(cfg) -> bool:
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
     clip_requests += agent_due(cfg, reviews, state)
     rerun = quran_auto(cfg, reviews, today) or rerun
+    rerun = fixed_auto(cfg, reviews) or rerun
     if state.get("commands") != COMMANDS_VERSION:     # the bot's "/" menu
         try:
             import json

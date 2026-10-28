@@ -304,6 +304,7 @@ def autofix(cfg, req: dict) -> dict:
              "on request" if manual else "timer", res["decision"], res["confidence"], len(res["edits"]),
              res["dropped"], res["tool_calls"])
     r["auto"] = {"status": "fixed" if manual else "approved" if res["decision"] == "approve" else "held",
+                 "decision": res["decision"],
                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                  "confidence": res["confidence"], "summary": res["summary"], "why": res["why"],
                  "changes": res["changes"], "dropped": res["dropped"], "locked": res["locked"]}
