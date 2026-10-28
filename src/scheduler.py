@@ -52,6 +52,10 @@ def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None 
     wins3 = [(max(s, earliest), e, w) for s, e, w in _windows(cfg, day, tz) if e > earliest]
     wins = [(s, e) for s, e, _ in wins3]
     weights = [w for _, _, w in wins3]
+    # many videos in one day: shrink the gap so they still fit inside the peak windows
+    window_min = sum((e - s).total_seconds() / 60 for s, e in wins)
+    if n > 1:
+        gap = min(gap, timedelta(minutes=max(20, 0.6 * window_min / n)))
     if n == 0:
         return []
     if not wins:
