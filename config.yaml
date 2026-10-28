@@ -295,7 +295,9 @@ publishing:
 agent:
   enabled: true
   provider: gemini            # gemini (مجاني) | claude (مدفوع، محتاج ANTHROPIC_API_KEY)
-  gemini_model: gemini-flash-latest   # لو اتغير اسمه بيختار أحدث Flash لوحده
+  # بالترتيب: لو موديل مشغول أو بطيء بيروح للي بعده. gemini-3.5-flash كان الأسرع (7 ث للفة) في التجربة
+  gemini_models: [gemini-3.5-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-flash-latest, gemini-3.5-flash-lite]
+  gemini_timeout: 90         # ثواني لكل رد قبل ما يعتبر الموديل مشغول
   model: claude-opus-5-5      # لو provider: claude
   effort: high                # لو provider: claude
   delay_hours: 2

@@ -154,17 +154,22 @@ class Corrector:
         self.a = cfg.get("agent") or {}
         self.segs = speech_segments(r)
         self.calls = {"relisten": 0, "quran_search": 0}
+        self._heard: dict[tuple, str] = {}
 
     # ---------------------------------------------------------------- tools
     def relisten(self, line: int, context_prompt: str, slow: bool) -> str:
         if not 1 <= line <= len(self.segs):
             return f"Error: no line {line} (lines are 1-{len(self.segs)})"
-        if self.calls["relisten"] >= int(self.a.get("max_relisten", 12)):
+        key = (line, context_prompt, slow)
+        if key in self._heard:          # same request again (e.g. after switching model): no re-run
+            return self._heard[key]
+        if len(self._heard) >= int(self.a.get("max_relisten", 12)):
             return "Error: relisten limit reached — decide with what you have"
         from .. import asr
         s = self.segs[line - 1]
         res = asr.transcribe_slice(self.cfg, self.audio, s["start"], s["end"], context_prompt, slow)
-        return json.dumps(res, ensure_ascii=False)
+        self._heard[key] = json.dumps(res, ensure_ascii=False)
+        return self._heard[key]
 
     def quran_search(self, text: str) -> str:
         from ..lectures import find_quotes, quote_text
@@ -204,8 +209,8 @@ class Corrector:
             from . import gemini
             try:
                 return gemini.run(SYSTEM, self.user_prompt(), TOOLS, RESULT_SCHEMA, self._run_tool,
-                                  self.a.get("gemini_model", "gemini-flash-latest"),
-                                  int(self.a.get("max_turns", 16)))
+                                  list(self.a.get("gemini_models") or ["gemini-3.5-flash"]),
+                                  int(self.a.get("max_turns", 16)), int(self.a.get("gemini_timeout", 90)))
             except gemini.GeminiError as e:
                 raise AgentError(str(e)) from e
         return self._ask_claude()
