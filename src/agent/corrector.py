@@ -1,4 +1,5 @@
-"""Subtitle-correction agent for lecture / link clips (Claude + two tools).
+"""Subtitle-correction agent for lecture / link clips (free Gemini by default, Claude optional;
+two tools + what it learned from your own corrections — see memory.py).
 
 When you haven't touched a clip in Telegram for `agent.delay_hours`, the poller starts this on
 GitHub Actions. Claude reads the numbered subtitle lines (Whisper's transcript, with the words it
@@ -188,14 +189,31 @@ class Corrector:
             return f"Error: {e}"
 
     # ---------------------------------------------------------------- loop
-    def ask(self) -> dict:
-        import anthropic
-        client = anthropic.Anthropic()
+    def user_prompt(self) -> str:
+        from . import memory
         title = self.r.get("title") or ""
         who = self.r.get("sheikh_name") or "شيخ"
-        user = (f"المتكلم: {who}\nالعنوان: {title or '—'}\n\nسطور الترجمة:\n{lines_prompt(self.r)}\n\n"
+        ex = memory.examples(int(self.a.get("examples", 20)))
+        refs = (f"\n\nتصحيحات عملها صاحب القناة بنفسه قبل كدا (اتعلم منها أسلوبه والأسماء الصح):\n{ex}"
+                if ex else "")
+        return (f"المتكلم: {who}\nالعنوان: {title or '—'}{refs}\n\nسطور الترجمة:\n{lines_prompt(self.r)}\n\n"
                 "صحح السطور حسب القواعد ورجّع النتيجة.")
-        messages = [{"role": "user", "content": user}]
+
+    def ask(self) -> dict:
+        if self.a.get("provider", "gemini") == "gemini":
+            from . import gemini
+            try:
+                return gemini.run(SYSTEM, self.user_prompt(), TOOLS, RESULT_SCHEMA, self._run_tool,
+                                  self.a.get("gemini_model", "gemini-flash-latest"),
+                                  int(self.a.get("max_turns", 16)))
+            except gemini.GeminiError as e:
+                raise AgentError(str(e)) from e
+        return self._ask_claude()
+
+    def _ask_claude(self) -> dict:
+        import anthropic
+        client = anthropic.Anthropic()
+        messages = [{"role": "user", "content": self.user_prompt()}]
         tools = TOOLS          # non-streaming requests, so no eager_input_streaming
         for turn in range(int(self.a.get("max_turns", 16))):
             resp = client.beta.messages.create(
@@ -271,7 +289,10 @@ class Corrector:
 
 
 def correct(cfg, r: dict, audio: Path) -> dict:
-    if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+    if (cfg.get("agent") or {}).get("provider", "gemini") == "gemini":
+        if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+            raise AgentError("GEMINI_API_KEY مش متضاف")
+    elif not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
         raise AgentError("ANTHROPIC_API_KEY مش متضاف")
     c = Corrector(cfg, r, audio)
     return c.decide(c.ask())

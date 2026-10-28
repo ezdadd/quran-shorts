@@ -61,6 +61,16 @@ def _chunks(audio: np.ndarray, sr: int = 16000, target: float = 50.0):
         start = cut
 
 
+def _hotwords() -> str | None:
+    """Names / terms learned from your Telegram corrections (src/agent/memory.py)."""
+    try:
+        from .agent.memory import hotwords
+        return hotwords() or None
+    except Exception as e:      # never let learning break transcription
+        log.warning("hotwords unavailable: %s", e)
+        return None
+
+
 def transcribe(cfg, path: Path) -> list[dict]:
     """Word list [{w, s, e, p}] (text, start, end, probability), cached by file content."""
     st = path.stat()
@@ -71,11 +81,12 @@ def transcribe(cfg, path: Path) -> list[dict]:
         return data["words"]
     audio = _decode(path)
     model = _load_model(cfg)
+    hot = _hotwords()
     t = time.time()
     words = []
     for off, chunk in _chunks(audio):
         segs, _ = model.transcribe(chunk, language="ar", word_timestamps=True, vad_filter=True,
-                                   beam_size=5, condition_on_previous_text=False)
+                                   beam_size=5, condition_on_previous_text=False, hotwords=hot)
         for s in segs:
             for w in s.words or []:
                 words.append({"w": w.word.strip(), "s": round(off + w.start, 3),
@@ -108,6 +119,7 @@ def transcribe_slice(cfg, path: Path, start: float, end: float, prompt: str | No
         chunk = np.frombuffer(raw, np.float32)
     model = _load_model(cfg)
     segs, _ = model.transcribe(chunk, language="ar", word_timestamps=True, vad_filter=False, beam_size=8,
-                               condition_on_previous_text=False, initial_prompt=prompt or None)
+                               condition_on_previous_text=False, initial_prompt=prompt or None,
+                               hotwords=None if prompt else _hotwords())
     words = [{"w": w.word.strip(), "p": round(w.probability, 2)} for s in segs for w in (s.words or [])]
     return {"text": " ".join(w["w"] for w in words), "words": words}

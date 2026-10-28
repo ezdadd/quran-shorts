@@ -145,6 +145,10 @@ def make_clips(cfg, req: dict) -> list[Path]:
     truncated = B < total - 1 and req.get("start") is None
     audio = cut_audio(src, work / "part.mp3", A, B - A)
     words = asr.transcribe(cfg, audio)
+    from .agent import memory
+    fixed = memory.apply_rules(words, memory.rules(int((cfg.get("agent") or {}).get("learn_min_count", 2))))
+    if fixed:
+        log.info("applied %d learned fixes from your past corrections", fixed)
     base = A
     if not words:
         raise ClipError("مفيش كلام مفهوم في المقطع ده")
@@ -263,12 +267,18 @@ def _queued(vid: str) -> dict:
 def rerender_edit(cfg, req: dict) -> tuple[Path, dict]:
     """Apply your subtitle edits (from Telegram) to a queued clip and rebuild it."""
     from .review.edit import apply_edits
+    from .agent import memory
+    from .review.edit import speech_segments
     vid = req["edit"]
     r = _queued(vid)
+    segs = speech_segments(r)
+    learned = [{"line": int(k), "old": segs[int(k) - 1].get("text") or " ".join(w["w"] for w in segs[int(k) - 1]["words"]),
+                "new": v} for k, v in req["edits"].items() if 1 <= int(k) <= len(segs)]
     n = apply_edits(r, req["edits"])
     if not n:
         raise ClipError("مفيش سطر اتعدل (اتأكد من أرقام السطور)")
     r.pop("auto", None)                 # you edited it: your approval decides from here
+    memory.record(r, learned)           # the agent learns from every correction you make
     q, old_tg = _rerender(cfg, r, vid, _clip_audio(cfg, r, vid))
     log.info("[%s] %d subtitle lines edited, re-rendered", vid, n)
     return q, old_tg

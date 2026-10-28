@@ -285,17 +285,23 @@ publishing:
   days_ahead: 2            # يتعمل فيديوهات النهارده + اليومين الجايين، وتستنى موافقتك
 
 # ------------------------------------------------------------
-# المصحح الذكي (Claude): لو مقطع لينك/درس فضل من غير مراجعة منك delay_hours، بيراجع الترجمة
+# المصحح الذكي (مجاني — Gemini): لو مقطع لينك/درس فضل من غير مراجعة منك delay_hours، بيراجع الترجمة
 # (بيسمع تاني الكلمات المش واضحة)، يصححها من غير ما يغيّر لهجة الشيخ، ويوافق لوحده.
 # مش بيلمس الآيات ولا الأحاديث، وبيستناك لو فيه آية/حديث مش واضح أو مش واثق.
-# محتاج ANTHROPIC_API_KEY في .env وفي GitHub Secrets.
+# بيتعلم من كل تصحيح بتعمله في تيليجرام (data/corrections/): التصحيح اللي بيتكرر بيتطبق لوحده،
+# والأسماء بتتدّى لـ Whisper، وآخر تصحيحاتك بتتدّى للمصحح كأمثلة.
+# محتاج GEMINI_API_KEY (مجاني من aistudio.google.com) في .env وفي GitHub Secrets.
 # ------------------------------------------------------------
 agent:
   enabled: true
+  provider: gemini            # gemini (مجاني) | claude (مدفوع، محتاج ANTHROPIC_API_KEY)
+  gemini_model: gemini-flash-latest   # لو اتغير اسمه بيختار أحدث Flash لوحده
+  model: claude-opus-5-5      # لو provider: claude
+  effort: high                # لو provider: claude
   delay_hours: 2
-  model: claude-opus-5-5
-  effort: high
   auto_approve_min: medium   # high = يوافق بس لو واثق جدًا، medium = يقبل شكوك بسيطة
   min_similarity: 0.5        # تعديل بيغيّر السطر أكتر من كدا بيتلغي (عشان ميعيدش صياغة كلام الشيخ)
   max_relisten: 12
   max_turns: 16
+  learn_min_count: 2         # تصحيح كررته كام مرة عشان يتطبق لوحده على المقاطع الجاية
+  examples: 20               # كام تصحيح من تصحيحاتك بيتدّى للمصحح كمثال

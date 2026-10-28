@@ -405,6 +405,8 @@ def cmd_prepare(cfg, args):
                 info = read_json(src.with_suffix(".info.json"), {})
                 sheikh = root.name
                 words = asr.transcribe(cfg, src)
+                from .agent import memory     # fixes learned from your Telegram corrections
+                memory.apply_rules(words, memory.rules(int((cfg.get("agent") or {}).get("learn_min_count", 2))))
                 cands = candidates(words, lo, hi)
                 chosen = pick(cands, args.per_file)
                 log.info("%s: %d words, %d candidate windows, picked %d", src.name, len(words),
