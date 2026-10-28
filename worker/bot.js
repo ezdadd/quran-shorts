@@ -23,6 +23,11 @@ export default {
     }
     return new Response("ok");
   },
+  // Cron trigger (every 10 min): GitHub's own schedule fires only about once an hour, so the
+  // Worker keeps time — the 2-hour agent timer and the Quran auto-checks then run on time.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(dispatch(env, null));
+  },
 };
 
 // ---------------------------------------------------------------- Telegram webhook
@@ -79,12 +84,12 @@ function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<shei
 // The update itself rides along with the run (KV *listing* can lag ~60 s behind writes, so the
 // poller would often not see it yet); KV stays the backup for runs that get superseded.
 async function dispatch(env, u) {
-  const update = JSON.stringify(u);
+  const update = u ? JSON.stringify(u) : "";
   const r = await fetch(`https://api.github.com/repos/${env.REPO}/actions/workflows/telegram.yml/dispatches`, {
     method: "POST",
     headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: "application/vnd.github+json",
                "user-agent": "ezdadd-bot", "content-type": "application/json" },
-    body: JSON.stringify({ ref: "main", inputs: update.length < 60000 ? { update } : {} }),
+    body: JSON.stringify({ ref: "main", inputs: update && update.length < 60000 ? { update } : {} }),
   });
   if (!r.ok) console.log("dispatch failed", r.status, await r.text());
 }

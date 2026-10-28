@@ -93,6 +93,9 @@ def main() -> None:
        files={"metadata": (None, json.dumps(meta), "application/json"),
               "bot.js": ("bot.js", code, "application/javascript+module")})
     print("worker uploaded")
+    # timekeeper: wake the GitHub poller every 10 min (GitHub's own cron fires ~hourly)
+    cf("PUT", f"/accounts/{acc}/workers/scripts/{NAME}/schedules", json=[{"cron": "*/10 * * * *"}])
+    print("cron trigger: every 10 min")
 
     # 3) public URL on workers.dev
     try:
