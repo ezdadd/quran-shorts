@@ -318,6 +318,34 @@ def _caption(r: dict, reviews: dict) -> str:
     return s[:1024]
 
 
+def fetch_updates(state: dict) -> tuple[list[dict], bool]:
+    """New updates: from the instant Cloudflare Worker (webhook mode, worker/bot.js) when it is set
+    up, else straight from Telegram (getUpdates). Returns (updates, came_from_worker)."""
+    w, k = os.environ.get("WORKER_URL"), os.environ.get("WORKER_KEY")
+    if w and k:
+        try:
+            r = requests.get(w.rstrip("/") + "/updates", headers={"x-worker-key": k}, timeout=30)
+            r.raise_for_status()
+            return r.json(), True
+        except requests.RequestException as e:
+            log.warning("worker unreachable (%s) — trying Telegram directly", e)
+    try:
+        return api("getUpdates", offset=state["offset"], timeout=0,
+                   allowed_updates='["message","callback_query"]'), False
+    except TelegramError as e:          # webhook is set: Telegram keeps the updates for the Worker
+        log.warning("getUpdates: %s", e)
+        return [], False
+
+
+def write_menu_data(cfg) -> None:
+    """data/bot_menu.json — the themes and sheikhs the Worker shows in the /generate menu
+    (same order as here, so the button numbers mean the same thing on both sides)."""
+    path = ROOT / "data" / "bot_menu.json"
+    data = {"themes": _themes(cfg), "reciters": [list(x) for x in _reciters(cfg)]}
+    if read_json(path, None) != data:
+        write_json(path, data)
+
+
 def quran_check(cfg, r: dict) -> str | None:
     """Automatic checks standing in for your review of a Quran video. None = fine, else the reason.
     (The ayah text itself was already verified against two sources when the video was made.)"""
@@ -631,8 +659,8 @@ def poll(cfg) -> bool:
     today = datetime.now(ZoneInfo(cfg["timezone"])).date().isoformat()
     rerun = False
     clip_requests: list[dict] = []
-    updates = api("getUpdates", offset=state["offset"], timeout=0,
-                  allowed_updates='["message","callback_query"]')
+    updates, via_worker = fetch_updates(state)
+    write_menu_data(cfg)
     for u in updates:
         state["offset"] = u["update_id"] + 1
         cq, msg = u.get("callback_query"), u.get("message")
@@ -808,6 +836,13 @@ def poll(cfg) -> bool:
             log.warning("setMyCommands: %s", e)
     store.save(reviews)
     write_json(STATE, state)
+    if via_worker and updates:          # processed: remove them from the Worker's store
+        try:
+            requests.post(os.environ["WORKER_URL"].rstrip("/") + "/ack", timeout=30,
+                          headers={"x-worker-key": os.environ["WORKER_KEY"]},
+                          json={"ids": [u["update_id"] for u in updates]}).raise_for_status()
+        except requests.RequestException as e:
+            log.warning("worker ack: %s", e)
     # handed to the workflow, which starts one clip job per request
     import json
     out = ROOT / ".cache" / "clip_requests.jsonl"

@@ -135,6 +135,10 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     items = todays_items(cfg, day)
     # only videos with at least one available platform still unscheduled
     items = [(p, r) for p, r in items if any(pl not in (r.get("published") or {}) for pl in platforms)]
+    # its file was already removed from hosting after publishing: never re-post it (e.g. on a platform
+    # connected later) — there is nothing left to upload
+    items = [(p, r) for p, r in items
+             if not ((r.get("hosting") or {}).get("deleted") and not p.with_suffix(".mp4").exists())]
     if not items:
         log.info("nothing to publish for %s", day)
         if errors:
@@ -320,12 +324,15 @@ def cleanup(cfg) -> None:
                 problems.append(f"{r['id']} {pl}: {(st.get('error') or {}).get('message')}")
             changed = True
         h = r.get("hosting") or {}
-        if h.get("public_id") and not h.get("deleted"):
+        if h.get("public_id") and not h.get("deleted") and pub:
+            # Buffer fetches the file from Cloudinary when it posts; Facebook got it uploaded directly.
+            # Free the space as soon as every Buffer post is confirmed sent (a failed one is kept a day
+            # in case it is retried); a Facebook-only video right after its time.
             buf = [i for pl, i in pub.items() if pl != "facebook"]
-            done = buf and all(i.get("status") in ("sent", "error") or
-                               datetime.fromisoformat(i["due"]) + timedelta(hours=hours * 4) < now
-                               for i in buf)
-            last_due = max((datetime.fromisoformat(i["due"]) for i in buf), default=None)
+            done = all(i.get("status") == "sent" or
+                       (i.get("status") == "error" and datetime.fromisoformat(i["due"]) + timedelta(hours=24) < now)
+                       for i in buf)
+            last_due = max((datetime.fromisoformat(i["due"]) for i in pub.values() if i.get("due")), default=None)
             if done and last_due and last_due + timedelta(hours=hours) < now:
                 try:
                     h["deleted"] = hosting.delete(h["public_id"])

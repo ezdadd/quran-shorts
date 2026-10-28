@@ -285,7 +285,7 @@ publishing:
   max_per_day: 10                # أقصى عدد فيديوهات في اليوم؛ اللي ميلحقش بيتنشر بكرة أول حاجة
   min_lead_minutes: 25           # أقل وقت بين الجدولة والنشر (فيسبوك محتاج 10+ دقايق)
   youtube_category: "27"         # Education
-  delete_hosted_after_hours: 6   # يمسح الفيديو من Cloudinary بعد النشر بالوقت ده
+  delete_hosted_after_hours: 1   # يمسح الفيديو من Cloudinary بعد ما كل المنصات تأكد إنه اتنشر بالوقت ده (كل ساعة)
   facebook_api_version: v26.0
   require_approval: true   # كل فيديو محتاج موافقة: منك، أو تلقائي بعد الفحص لو معملتش حاجة (تحت)
   # فيديوهات القرآن اليومية: لو معملتش حاجة خلال auto_approve_hours بتتفحص تلقائي (النص والمدة والملف)
