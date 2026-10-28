@@ -93,9 +93,9 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
                 errors.append(f"Facebook token: {e}")
         for pl in platforms:
             if pl == "facebook" and not fb_ok:
-                errors.append("facebook: not configured / token invalid — skipped")
+                log.info("facebook: not configured / token invalid — skipped")
             elif pl != "facebook" and pl not in chans:
-                errors.append(f"{pl}: no connected Buffer channel — skipped")
+                log.info(f"{pl}: no connected Buffer channel — skipped")
         # only platforms that can actually take a post right now; the rest are retried on the
         # next day's videos, never back-filled onto old ones
         platforms = [pl for pl in platforms if (fb_ok if pl == "facebook" else pl in chans)]

@@ -121,7 +121,7 @@ def send(cfg) -> int:
                 continue
             if not store.get(r["id"], reviews).get("status") and day == days[0] and not r.get("approved"):
                 waiting_today += 1
-            if (r.get("telegram") or {}).get("message_id"):
+            if (r.get("telegram") or {}).get("message_id") or r.get("published"):
                 continue
             try:
                 from ..publish.runner import video_file
