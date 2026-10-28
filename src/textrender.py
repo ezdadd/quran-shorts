@@ -36,7 +36,7 @@ html,body{margin:0;padding:0;background:transparent;width:1080px;height:1920px;o
 .w.todo{opacity:.72}
 .w.cur{color:var(--accent);text-shadow:0 0 22px rgba(242,210,122,.55),0 2px 5px rgba(0,0,0,.85)}
 .w.hide,.m.hide{visibility:hidden}
-.m{white-space:nowrap}
+.m,.g{white-space:nowrap}
 .br{font-family:"B";color:var(--accent)}
 .lbl{position:absolute;left:0;right:0;text-align:center;direction:rtl;font-family:"L";
      color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.85)}
@@ -67,11 +67,17 @@ function layoutAyah(p){
   c.style.fontFamily='"Q"'; c.style.color=p.color; c.style.setProperty("--accent",p.accent);
   c.style.fontWeight=p.weight||400;
   // a long ayah is split into screens: opening bracket on the first, marker + closing on the last
-  let h="";
-  if(p.open) h+='<span class="br m">﴿</span> ';
-  h+=p.words.map((w,i)=>`<span class="w" id="w${i}">${esc(w)}</span>`).join(" ");
-  if(p.marker) h+=` <span class="m tail" id="mk">${esc(p.marker)}</span>`;
-  if(p.close) h+=' <span class="br m tail">﴾</span>';
+  // the brackets / ayah number are glued to the first / last word (nowrap) so a bracket can
+  // never end up alone on a line
+  const ws0=p.words.map((w,i)=>`<span class="w" id="w${i}">${esc(w)}</span>`);
+  let head=p.open?'<span class="br m">﴿</span> ':"", tail="";
+  if(p.marker) tail+=` <span class="m tail" id="mk">${esc(p.marker)}</span>`;
+  if(p.close) tail+=' <span class="br m tail">﴾</span>';
+  const n=ws0.length;
+  let h;
+  if(n<=1) h=`<span class="g">${head}${ws0.join("")}${tail}</span>`;
+  else h=`<span class="g">${head}${ws0[0]}</span> `+ws0.slice(1,n-1).join(" ")+(n>2?" ":"")+
+         `<span class="g">${ws0[n-1]}${tail}</span>`;
   c.innerHTML=h; st.appendChild(c);
   let size=p.size;
   const fit=()=>{c.style.fontSize=size+"px"; c.style.lineHeight=(p.lineHeight||1.85);};

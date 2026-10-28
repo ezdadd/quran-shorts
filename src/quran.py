@@ -181,7 +181,12 @@ def load_text(cfg, surah: int, ayah: int, recitation_id: int = 6) -> tuple[str, 
 
 
 def load_ayah(cfg, reciter: dict, surah: int, ayah: int) -> Ayah:
-    text, words, v = load_text(cfg, surah, ayah, reciter["quran_com_id"])
+    # quran_com_id is optional: without it the text still comes from Quran.com (via Husary's
+    # recitation id) but there is no word-level timing, so words are not highlighted one by one
+    qc_id = reciter.get("quran_com_id")
+    text, words, v = load_text(cfg, surah, ayah, qc_id or 6)
+    if not qc_id:
+        v = {**v, "audio": {}}
     folder = reciter["everyayah_folder"]
     audio = download(f"{EVERYAYAH}/{folder}/{surah:03d}{ayah:03d}.mp3",
                      cache_dir(cfg, "audio", folder) / f"{surah:03d}{ayah:03d}.mp3")

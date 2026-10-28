@@ -46,6 +46,35 @@ reciters:
     everyayah_folder: Minshawy_Mujawwad_192kbps
     quran_com_id: 8
     weight: 1
+  alafasy:
+    name_ar: مشاري راشد العفاسي
+    everyayah_folder: Alafasy_128kbps
+    quran_com_id: 7
+    weight: 1
+  abdulbasit:
+    name_ar: عبد الباسط عبد الصمد
+    everyayah_folder: Abdul_Basit_Murattal_192kbps
+    quran_com_id: 2
+    weight: 1
+  abdulbasit_mujawwad:
+    name_ar: عبد الباسط عبد الصمد
+    label_ar: تلاوة مجوّدة
+    everyayah_folder: Abdul_Basit_Mujawwad_128kbps
+    quran_com_id: 1
+    weight: 1
+  # المعيقلي والدوسري: مفيش توقيت كلمات منشور ليهم، فالآية بتظهر كاملة من غير تلوين كلمة بكلمة
+  maher:
+    name_ar: ماهر المعيقلي
+    everyayah_folder: MaherAlMuaiqly128kbps
+    weight: 1
+  yasser:
+    name_ar: ياسر الدوسري
+    everyayah_folder: Yasser_Ad-Dussary_128kbps
+    weight: 1
+  qatami:
+    name_ar: ناصر القطامي
+    everyayah_folder: Nasser_Alqatami_128kbps
+    weight: 1
   # تسجيل نادر للمنشاوي (1967) من mp3quran.net. مفيش له توقيت آيات منشور، فبيتعمله
   # محاذاة محليًا بـ whisper مع نص الـ API. weight: 0 = مش بيدخل التشغيل اليومي التلقائي؛
   # بيتولد على جهازك بـ --reciter minshawi_1967 وكل فيديو منه لازم مراجعتك قبل النشر.
@@ -66,6 +95,14 @@ quran:
   cross_check: true
   # مقطع مايتكررش قبل كام يوم
   passage_cooldown_days: 45
+  # احتمال اختيار كل نوع آيات (أعلى = أكتر). الأولوية للحكمة والوعظ والصبر لأنها الأكتر تفاعلًا.
+  theme_weights:
+    حكمة ووعظ: 5
+    طمأنينة وصبر: 4
+    رحمة ومغفرة: 3
+    دعاء: 2
+    تسبيح وتعظيم: 1
+    تأمل في الخلق: 1
 
 # ------------------------------------------------------------
 # مقاطع الطبيعة: تصنيف -> كلمات بحث

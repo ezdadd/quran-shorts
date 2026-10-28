@@ -47,7 +47,10 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
     recent = {k for k, d in history.setdefault("passages_used", {}).items() if d >= cutoff}
     passages = [p for p in load_passages(cfg)
                 if f"{p['surah']}:{p['from']}-{p['to']}" not in recent]
-    rng.shuffle(passages)
+    # weighted random order (themes in quran.theme_weights come up more often); list is popped
+    # from the end, so the most favoured keys sort last
+    tw = cfg["quran"].get("theme_weights") or {}
+    passages.sort(key=lambda p: rng.random() ** (1.0 / max(0.01, float(tw.get(p.get("theme"), 1)))))
     if force_passage:
         s, rngs = force_passage.split(":")
         a, _, b = rngs.partition("-")
