@@ -109,7 +109,8 @@ def make_clips(cfg, req: dict) -> list[Path]:
     work = cache_dir(cfg, "clips", rid)
     src, info = fetch_audio(cfg, req, work)
     total = media_duration(src)
-    n = int(req.get("n") or 1)
+    # a long source with no time / count given: its best few moments, each its own Reel
+    n = int(req.get("n") or (cl.get("auto_clips_long", 3) if total > 180 else 1))
 
     windows: list[tuple[float, float]]
     if req.get("start") is not None:
