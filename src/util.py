@@ -103,7 +103,9 @@ def _find_tool(name: str) -> str:
     hits = glob.glob(pattern)
     if hits:
         return hits[0]
-    raise FileNotFoundError(f"{name} not found; install FFmpeg and put it on PATH")
+    # not fatal at import: the Telegram poller runs without FFmpeg; a render fails clearly instead
+    logging.getLogger(__name__).debug("%s not found; install FFmpeg and put it on PATH", name)
+    return name
 
 
 FFMPEG = _find_tool("ffmpeg")
