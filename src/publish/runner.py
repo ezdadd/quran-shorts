@@ -70,15 +70,6 @@ def _texts(r: dict, platform: str) -> tuple[str, str]:
 def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     tz = ZoneInfo(cfg["timezone"])
     platforms = cfg["publishing"]["platforms"]
-    items = todays_items(cfg, day)
-    # only videos with at least one platform still unscheduled
-    items = [(p, r) for p, r in items if any(pl not in (r.get("published") or {}) for pl in platforms)]
-    if not items:
-        log.info("nothing to publish for %s", day)
-        return {"scheduled": 0, "errors": []}
-    rng.shuffle(items)
-    times = scheduler.base_times(cfg, rng, len(items), day)
-
     errors: list[str] = []
     chans: dict = {}
     fb_ok = False
@@ -91,7 +82,8 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
         if facebook.configured():
             try:
                 st = facebook.token_status(cfg)
-                fb_ok = st["valid"]
+                need = {"pages_show_list", "pages_read_engagement", "pages_manage_posts"}
+                fb_ok = st["valid"] and (not st.get("scopes") or need <= set(st["scopes"]))
                 exp = st.get("expires_at")
                 if exp and exp - datetime.now().timestamp() < 7 * 86400:
                     notify.send(f"توكن صفحة فيسبوك هينتهي {datetime.fromtimestamp(exp):%Y-%m-%d} — جدده")
@@ -102,6 +94,20 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
                 errors.append("facebook: not configured / token invalid — skipped")
             elif pl != "facebook" and pl not in chans:
                 errors.append(f"{pl}: no connected Buffer channel — skipped")
+        # only platforms that can actually take a post right now; the rest are retried on the
+        # next day's videos, never back-filled onto old ones
+        platforms = [pl for pl in platforms if (fb_ok if pl == "facebook" else pl in chans)]
+
+    items = todays_items(cfg, day)
+    # only videos with at least one available platform still unscheduled
+    items = [(p, r) for p, r in items if any(pl not in (r.get("published") or {}) for pl in platforms)]
+    if not items:
+        log.info("nothing to publish for %s", day)
+        if errors:
+            notify.send("مشاكل في النشر:\n" + "\n".join(errors))
+        return {"scheduled": 0, "errors": errors}
+    rng.shuffle(items)
+    times = scheduler.base_times(cfg, rng, len(items), day)
 
     hist_p = path(cfg, "history")
     history = read_json(hist_p, {})
