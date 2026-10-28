@@ -222,8 +222,11 @@ def poll(cfg) -> bool:
                         reply_markup=_kb(vid, status))
                 except TelegramError as e:
                     log.warning("edit caption: %s", e)
-            api("answerCallbackQuery", callback_query_id=cq["id"],
-                text={"approved": "اتوافق ✅", "rejected": "اترفض ❌" + note, None: "رجع للانتظار"}[status])
+            try:                    # only works within a few minutes of the press — the
+                api("answerCallbackQuery", callback_query_id=cq["id"],    # caption edit is what shows
+                    text={"approved": "اتوافق ✅", "rejected": "اترفض ❌" + note, None: "رجع للانتظار"}[status])
+            except TelegramError:
+                pass
         elif msg:
             if str(msg["chat"]["id"]) != me:
                 continue
