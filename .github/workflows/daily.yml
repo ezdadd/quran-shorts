@@ -81,13 +81,23 @@ jobs:
           key: quran-data-${{ github.run_id }}
           restore-keys: quran-data-
 
-      - name: Generate today's videos
-        run: >
-          python -m src.main --no-publish
-          ${{ inputs.count && format('--generate {0}', inputs.count) || '--top-up' }}
-          ${{ inputs.dry_run && '--dry-run' || '' }}
+      - name: Generate videos for today and the next days (tops up rejected ones too)
+        run: |
+          if [ -n "${{ inputs.count }}" ]; then
+            python -m src.main --no-publish --generate ${{ inputs.count }} ${{ inputs.dry_run && '--dry-run' || '' }}
+            exit 0
+          fi
+          AHEAD=$(python -c "from src.util import load_config; print(load_config()['publishing'].get('days_ahead', 2))")
+          for i in $(seq 0 $AHEAD); do
+            D=$(TZ=Africa/Cairo date -d "+$i day" +%F)
+            python -m src.main --no-publish --top-up --date "$D" ${{ inputs.dry_run && '--dry-run' || '' }}
+          done
 
-      - name: Clean up yesterday + publish today (one retry)
+      - name: Send new videos to Telegram for review
+        if: ${{ !inputs.dry_run }}
+        run: python -m src.review.telegram send
+
+      - name: Clean up yesterday + publish today's approved videos (one retry)
         if: ${{ !inputs.dry_run }}
         run: |
           python -m src.publish.runner --cleanup || true

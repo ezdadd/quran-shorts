@@ -1,0 +1,60 @@
+name: telegram-review
+
+# Every hour: read your Telegram button presses / hashtag edits / commands, save them, and —
+# when a video for today was approved or something was rejected — run the daily workflow again
+# so today's approved videos get scheduled and rejected ones get replaced.
+# (~30 s per run → ~720 billed minutes a month; Telegram keeps unread updates for 24 h.)
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: telegram-review
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONIOENCODING: utf-8
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
+      FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python packages (light)
+        run: pip install requests pyyaml python-dotenv tenacity tzdata
+
+      - name: Read Telegram
+        id: poll
+        run: python -m src.review.telegram poll
+
+      - name: Save decisions
+        run: |
+          git config user.name "quran-shorts bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/reviews.json data/telegram_state.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "review: $(TZ=Africa/Cairo date '+%F %H:%M')"
+            for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 10; done
+          fi
+
+      - name: Schedule approved / replace rejected now
+        if: steps.poll.outputs.rerun == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run daily.yml -R ${{ github.repository }}

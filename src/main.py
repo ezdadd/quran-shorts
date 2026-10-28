@@ -125,7 +125,7 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
                 "published": {},
                 # recordings aligned locally (no published timings) must be approved by a human
                 "review_required": bool(rcfg.get("requires_review")),
-                "approved": not rcfg.get("requires_review"),
+                "approved": not rcfg.get("requires_review") and not cfg["publishing"].get("require_approval", True),
             }
             write_json(out_dir / f"{vid}.json", record)
             results.append(record)
@@ -167,9 +167,12 @@ def main(argv=None):
         args.date = datetime.now(ZoneInfo(cfg["timezone"])).date()
     n = args.generate if args.generate is not None else cfg["daily"]["quran_count"]
     if args.top_up:
-        have = len(list((ROOT / cfg["paths"]["output"] / args.date.isoformat()).glob("q-*.json")))
+        from .review import store as review
+        revs = review.load()
+        have = sum(1 for p in (ROOT / cfg["paths"]["output"] / args.date.isoformat()).glob("q-*.json")
+                   if not review.is_rejected(read_json(p, {}), revs))
         n = max(0, n - have)
-        log.info("top-up: %d already made today, generating %d", have, n)
+        log.info("top-up %s: %d usable already, generating %d", args.date, have, n)
 
     results = generate_quran(cfg, n, args.date, rng, history, args.dry_run, args.category,
                              args.reciter, args.passage)

@@ -26,7 +26,7 @@ def quran_meta(cfg, rng: random.Random, rec: quran.Recitation, credits: list[str
         body = f"{opener}\n{ref_line}\n{reciter_line}\n\n{' '.join(tags)}"
         out[p] = {"caption": body, "hashtags": tags}
     out["youtube"]["title"] = f"{rng.choice(c['openers'])} | {ref_line} - {rec.reciter_name}"[:100]
-    if credits:
+    if credits and cfg["captions"].get("footage_credit", False):   # not required by Pixabay/Pexels
         for p in PLATFORMS:
             out[p]["caption"] += "\n\n" + " · ".join(credits)
     return out

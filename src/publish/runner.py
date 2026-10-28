@@ -17,16 +17,19 @@ from zoneinfo import ZoneInfo
 from .. import scheduler
 from ..util import ROOT, load_config, path, read_json, setup_logging, write_json
 from . import buffer, facebook, hosting, notify, queue
+from ..review import store as review
 
 log = logging.getLogger("quran-shorts.publish")
 OUTPUT = ROOT / "output"
 
 
-def _ok_to_publish(r: dict) -> bool:
-    if r.get("rejected"):
+def _ok_to_publish(r: dict, reviews: dict | None = None) -> bool:
+    reviews = review.load() if reviews is None else reviews
+    if review.is_rejected(r, reviews):
         return False
-    if r.get("type") == "lecture" or r.get("review_required"):
-        return bool(r.get("approved"))
+    cfg = load_config()
+    if cfg["publishing"].get("require_approval", True) or r.get("type") == "lecture"             or r.get("review_required"):
+        return review.is_approved(r, reviews)
     return True
 
 
@@ -62,9 +65,8 @@ def video_file(rec_path: Path, r: dict) -> Path:
 
 
 def _texts(r: dict, platform: str) -> tuple[str, str]:
-    p = r.get("platforms", {}).get(platform) or r["platforms"]["tiktok"]
     title = r["platforms"].get("youtube", {}).get("title", "")
-    return p["caption"], title
+    return review.final_caption(r, platform, review.load()), title
 
 
 def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
@@ -107,7 +109,12 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             notify.send("مشاكل في النشر:\n" + "\n".join(errors))
         return {"scheduled": 0, "errors": errors}
     rng.shuffle(items)
-    times = scheduler.base_times(cfg, rng, len(items), day)
+    try:
+        times = scheduler.base_times(cfg, rng, len(items), day)
+    except ValueError as e:          # approved too late in the day — no window left
+        log.info("%s", e)
+        notify.send(f"اتأخر الوقت: {len(items)} فيديو متوافق عليهم النهارده مش هيلحقوا يتنشروا ({e})")
+        return {"scheduled": 0, "errors": errors}
 
     hist_p = path(cfg, "history")
     history = read_json(hist_p, {})
@@ -228,9 +235,20 @@ def cleanup(cfg) -> None:
     hours = cfg["publishing"]["delete_hosted_after_hours"]
     now = datetime.now(ZoneInfo(cfg["timezone"]))
     problems = []
+    reviews = review.load()
     for p in list(OUTPUT.glob("*/q-*.json")) + list(queue.QUEUE.glob("*.json")):
         r = read_json(p, {})
         pub = r.get("published") or {}
+        h0 = r.get("hosting") or {}
+        stale = not pub and r.get("date", "9999") < (now - timedelta(days=2)).date().isoformat()
+        if h0.get("public_id") and not h0.get("deleted") and (review.is_rejected(r, reviews) or stale):
+            try:                                  # rejected / never approved: free the space
+                h0["deleted"] = hosting.delete(h0["public_id"])
+                write_json(p, r)
+                log.info("deleted hosted file of %s (%s)", r["id"], "rejected" if not stale else "expired")
+            except Exception as e:
+                log.warning("delete %s: %s", r["id"], e)
+            continue
         changed = False
         for pl, info in pub.items():
             if pl == "facebook" or info.get("status") in ("sent", "error") or not info.get("post_id"):

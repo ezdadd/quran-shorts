@@ -167,6 +167,7 @@ captions:
   hashtags_pool: ["#راحة_نفسية", "#تدبر", "#قرآن_كريم", "#طمأنينة", "#ذكر_الله",
                   "#آيات", "#تلاوة_خاشعة", "#quran", "#shorts", "#اسلام", "#سكينة"]
   hashtag_count: [3, 5]
+  footage_credit: false   # Pixabay/Pexels لا يشترطوا ذكر المصدر
 
 asr:
   model: large-v3-turbo   # على الـ CPU: ~0.7x من الوقت الحقيقي (ساعة صوت ≈ 85 دقيقة)
@@ -209,3 +210,5 @@ publishing:
   youtube_category: "27"         # Education
   delete_hosted_after_hours: 6   # يمسح الفيديو من Cloudinary بعد النشر بالوقت ده
   facebook_api_version: v26.0
+  require_approval: true   # مفيش فيديو يتنشر غير بعد موافقتك في تيليجرام
+  days_ahead: 2            # يتعمل فيديوهات النهارده + اليومين الجايين، وتستنى موافقتك
