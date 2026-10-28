@@ -1,5 +1,6 @@
 """Turn a short-lived Facebook user token into a long-lived Page token and save it to .env.
 
+    python -m tools.fb_token                       # reads FB_SHORT_TOKEN from .env
     python -m tools.fb_token <SHORT_LIVED_USER_TOKEN>
 
 Needs FB_APP_ID and FB_APP_SECRET in .env. Steps (Meta docs, long-lived tokens):
@@ -30,10 +31,11 @@ def set_env(key: str, value: str) -> None:
 
 
 def main():
-    if len(sys.argv) != 2:
+    cfg = load_config()
+    short = sys.argv[1] if len(sys.argv) == 2 else os.environ.get("FB_SHORT_TOKEN", "").strip()
+    if not short:
         print(__doc__)
         sys.exit(1)
-    cfg = load_config()
     ver = cfg["publishing"].get("facebook_api_version", "v26.0")
     app_id, secret = os.environ.get("FB_APP_ID"), os.environ.get("FB_APP_SECRET")
     if not (app_id and secret):
@@ -41,7 +43,7 @@ def main():
     g = f"https://graph.facebook.com/{ver}"
     r = requests.get(f"{g}/oauth/access_token", params={
         "grant_type": "fb_exchange_token", "client_id": app_id, "client_secret": secret,
-        "fb_exchange_token": sys.argv[1]}, timeout=30).json()
+        "fb_exchange_token": short}, timeout=30).json()
     if "access_token" not in r:
         sys.exit(f"exchange failed: {r.get('error', r)}")
     pages = requests.get(f"{g}/me/accounts", params={"access_token": r["access_token"]},
