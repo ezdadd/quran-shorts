@@ -282,7 +282,7 @@ def poll(cfg) -> bool:
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
             elif not reply and (URL_IN.search(text) or _media(msg)):
                 media = _media(msg)
-                from ..clips import parse_request
+                from ..clip_request import parse_request
                 req = parse_request(text or msg.get("caption") or "")
                 if media:
                     if (media.get("file_size") or 0) > 20 * 1024 * 1024:
