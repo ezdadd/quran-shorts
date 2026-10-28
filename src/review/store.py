@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from ..util import ROOT, read_json, write_json
+from ..util import ROOT, load_config, read_json, write_json
 
 PATH = ROOT / "data" / "reviews.json"
 CREDIT_LINE = re.compile(r"^\s*Video by .+ on (Pixabay|Pexels)\s*$", re.M)
@@ -76,4 +76,24 @@ def final_caption(r: dict, platform: str, reviews: dict) -> str:
             new.append("#shorts")
         cap = cap.replace(old, " ".join(new)) if old and old in cap else \
             TAG.sub("", cap).rstrip() + "\n\n" + " ".join(new)
-    return re.sub(r"\n{3,}", "\n\n", cap).strip()
+    return with_fixed_tags(re.sub(r"\n{3,}", "\n\n", cap).strip(), platform)
+
+
+# hashtag caps per platform: YouTube ignores EVERY hashtag in a description with more than 15
+TAG_LIMIT = {"youtube": 15, "instagram": 30}
+
+
+def with_fixed_tags(cap: str, platform: str) -> str:
+    """The video's own hashtags first, then your fixed ones (captions.fixed_hashtags), de-duplicated
+    and cut to the platform's limit; all of them go on one line at the end."""
+    fixed = (load_config().get("captions") or {}).get("fixed_hashtags") or []
+    own = TAG.findall(cap)
+    seen, tags = set(), []
+    for t in (["#shorts"] if platform == "youtube" else []) + own + list(fixed):
+        k = t.lstrip("#＃").lower()
+        if k and k not in seen:
+            seen.add(k)
+            tags.append("#" + t.lstrip("#＃"))
+    tags = tags[:TAG_LIMIT.get(platform, 60)]
+    body = re.sub(r"[ \t]+\n", "\n", TAG.sub("", cap)).strip()
+    return re.sub(r"\n{3,}", "\n\n", f"{body}\n\n{' '.join(tags)}").strip()

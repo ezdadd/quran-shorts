@@ -21,7 +21,7 @@ import logging
 import os
 from pathlib import Path
 
-from ..align import norm
+from .memory import norm      # light key: spelling fixes (ابن القائم -> ابن القيم) count as changes
 from ..review.edit import speech_segments
 
 log = logging.getLogger("quran-shorts.agent")
@@ -252,11 +252,28 @@ class Corrector:
         raise AgentError("الوكيل خد لفات كتير من غير ما يخلص")
 
     # ---------------------------------------------------------------- policy
+    def near_ayah(self) -> set[int]:
+        """Speech line numbers directly before / after a verified Quran segment."""
+        out, n, prev_quran = set(), 0, False
+        for s in self.r.get("segments") or []:
+            if s.get("type") == "quran":
+                if n:
+                    out.add(n)
+                prev_quran = True
+            elif s.get("type") == "speech":
+                n += 1
+                if prev_quran:
+                    out.add(n)
+                prev_quran = False
+        return out
+
     def decide(self, out: dict) -> dict:
         """Turn the model's answer into edits we are willing to apply + approve / hold."""
         locked = {int(x["line"]): x for x in out.get("locked") or []}
+        near = self.near_ayah()
         edits: dict[str, str | None] = {}
         changes, dropped = [], []
+        touched_near = False
         for e in out.get("edits") or []:
             k = int(e["line"])
             if not 1 <= k <= len(self.segs):
@@ -264,6 +281,10 @@ class Corrector:
             old = self.segs[k - 1].get("text") or " ".join(w["w"] for w in self.segs[k - 1]["words"])
             if k in locked:
                 dropped.append(f"{k}: سطر {('آية' if locked[k]['kind'] == 'quran' else 'حديث')} — ممنوع يتعدل")
+                continue
+            if k in near:               # right next to a verified ayah: often the ayah itself, misheard
+                dropped.append(f"{k}: جنب آية — ممكن يكون جزء منها، ممنوع يتعدل")
+                touched_near = True
                 continue
             if e["action"] == "delete":
                 edits[str(k)] = None
@@ -284,6 +305,8 @@ class Corrector:
         if risky:
             decision, why = "hold", "فيه " + ("آية" if risky[0]["kind"] == "quran" else "حديث") + \
                 " الكلام فيه مش واضح — لازم تراجعه بنفسك"
+        elif touched_near:
+            decision, why = "hold", "سطر جنب آية شكله غلط (ممكن يكون الآية نفسها متسمعة غلط) — لازم تراجعه بنفسك"
         elif LEVEL.get(conf, 0) < LEVEL.get(need, 1):
             decision, why = "hold", "الوكيل مش واثق كفاية من التصحيح"
         else:

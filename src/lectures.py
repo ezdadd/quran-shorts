@@ -298,7 +298,23 @@ def face_center_x(src: Path, start: float, end: float) -> float | None:
     return round(float(sorted(xs)[len(xs) // 2]), 4) if xs else None
 
 
-def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
+def render_clip(cfg, rec: dict, tr: TextRenderer, tries: int = 3) -> Path:
+    """Render, and if it breaks (FFmpeg crash, bad footage file…) try again with other footage and
+    a safe look (no camera move / effects) instead of failing the whole job."""
+    from .templates import Template, safe
+    for attempt in range(tries):
+        try:
+            return _render_clip_once(cfg, rec, tr, attempt)
+        except Exception as e:
+            if attempt == tries - 1:
+                raise
+            log.error("[%s] render failed (try %d), retrying with other footage and a safe look: %s",
+                      rec["id"], attempt + 1, str(e).strip()[:300])
+            if rec.get("look"):
+                rec["look"] = safe(Template(**rec["look"])).to_dict()
+
+
+def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Path:
     src = ROOT / rec["source"]["file"]
     start, end = rec["clip"]["start"], rec["clip"]["end"]
     total = round(end - start, 3)
@@ -330,7 +346,7 @@ def render_clip(cfg, rec: dict, tr: TextRenderer) -> Path:
         # audio-only lecture: calm nature footage + waveform
         from . import footage
         from .render import build_background
-        rng = random.Random(rec["id"])
+        rng = random.Random(rec["id"] if not attempt else f"{rec['id']}#{attempt}")   # retry: other footage
         cat = footage.pick_category(cfg, rng)
         clips = footage.get_clips(cfg, cat, total, {}, rng)
         bg = build_background(cfg, clips, total, tpl, work / "bg.mp4")

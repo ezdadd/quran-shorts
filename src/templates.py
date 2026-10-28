@@ -78,6 +78,13 @@ def choose_clip(cfg: dict, rng: random.Random) -> Template:
                     animation="word", color="white", show_title=True, show_reciter=True, **_look(t, rng))
 
 
+def safe(tpl: Template) -> Template:
+    """Same look without camera move or extra effects — used to retry after a failed render."""
+    from dataclasses import replace
+    return replace(tpl, camera="still", ken_burns=False, grain=False, bloom=False, letterbox=False,
+                   entrance="fade")
+
+
 def readable_color(tpl: Template, luma: float) -> tuple[str, str]:
     """Pick (text colour, background style) that stays readable on footage of given mean luma
     (0..1, measured in the text zone). Bright footage forces a darker backing."""

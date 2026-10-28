@@ -29,6 +29,9 @@ log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
+COMMANDS_VERSION = 3
+GENERATE = {"n": 0}     # /generate N during this poll -> the workflow starts daily.yml with count=N
+GENERATE_MAX = 10
 ID_RE = re.compile(r"🆔\s*([\w-]+)")
 STATUS = {"approved": "✅ اتوافق عليه", "rejected": "❌ مرفوض — هيتعمل بديل", None: "⏳ مستني موافقتك",
           "waiting": "⏳ مستني موافقتك", "auto": "🤖 اتوافق تلقائيًا (المصحح) — تقدر ترفضه قبل النشر"}
@@ -48,6 +51,8 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
 🤖 لو مراجعتش مقطع لينك أو درس خلال ساعتين، المصحح بيراجع الترجمة (فصحى وعامية) ويصححها
    ويوافق لوحده — إلا لو فيه آية أو حديث مش واضح أو مش واثق، ساعتها بيستناك. الآيات والأحاديث مش بيلمسها.
    ↩️ أو ❌ بعدها بيلغوا موافقته.
+/generate 5  اعمل 5 فيديوهات قرآن جديدة جاهزة للطابور (من 1 لـ 10)
+/que عدد الفيديوهات في كل حالة (متوافق ومستني النشر، اتنشر، مرفوض، مستني موافقتك، تحت التجهيز، اللي شاركته)
 /status حالة الفيديوهات"""
 
 
@@ -228,6 +233,8 @@ def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
     now = datetime.now(timezone.utc)
     delay = timedelta(hours=float(a.get("delay_hours", 2)))
     started = state.setdefault("agent_started", {})
+    if any(now - datetime.fromisoformat(v["at"]) < timedelta(minutes=15) for v in started.values()):
+        return []                       # the last agent job is probably still running
     out = []
     for p in sorted((ROOT / "queue").glob("*.json")):
         r = read_json(p, {})
@@ -245,7 +252,70 @@ def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
             continue                    # running now, or already failed twice
         started[r["id"]] = {"at": now.isoformat(timespec="seconds"), "tries": (prev or {}).get("tries", 0) + 1}
         out.append({"id": f"auto-{r['id']}", "autofix": r["id"]})
+        if len(out) >= int(a.get("max_per_poll", 1)):
+            break                       # one at a time: parallel jobs hit the free tier's rate limit
     return out
+
+
+def _running_jobs() -> dict[str, int]:
+    """Clip / daily jobs queued or running on GitHub right now (videos being made)."""
+    repo, tok = os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    out = {"clip": 0, "daily": 0}
+    if not repo or not tok:
+        return out
+    for wf, k in (("clip.yml", "clip"), ("daily.yml", "daily")):
+        for st in ("in_progress", "queued"):
+            try:
+                r = requests.get(f"https://api.github.com/repos/{repo}/actions/workflows/{wf}/runs",
+                                 params={"status": st, "per_page": 50}, timeout=20,
+                                 headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
+                out[k] += r.json().get("total_count", 0) if r.ok else 0
+            except requests.RequestException:
+                pass
+    return out
+
+
+def queue_text(cfg, reviews: dict, state: dict) -> str:
+    """/que — how many videos are in each state."""
+    now = datetime.now(timezone.utc)
+    recs = []
+    for p in sorted(OUTPUT.glob("*/q-*.json")):
+        r = read_json(p, {})
+        if (r.get("telegram") or {}).get("message_id") or r.get("published"):   # real ones, not old tests
+            recs.append(r)
+    recs += [read_json(p, {}) for p in sorted((ROOT / "queue").glob("*.json"))]
+    c = {k: [] for k in ("approved", "scheduled", "published", "waiting", "held", "rejected")}
+    for r in recs:
+        pub = r.get("published") or {}
+        dues = [datetime.fromisoformat(i["due"]) for i in pub.values() if i.get("due")]
+        if store.is_rejected(r, reviews):
+            c["rejected"].append(r["id"])
+        elif pub and (any(i.get("status") == "sent" for i in pub.values()) or any(d <= now for d in dues)):
+            c["published"].append(r["id"])
+        elif pub:
+            c["scheduled"].append(r["id"])
+        elif store.is_approved(r, reviews):
+            c["approved"].append(r["id"])
+        else:
+            c["held" if (r.get("auto") or {}).get("status") == "held" else "waiting"].append(r["id"])
+    jobs = _running_jobs()
+    shared = state.get("shared")
+    n_shared = len(shared) if shared is not None else len({m.group(1) for r in recs
+                                                            if (m := re.match(r"(c-\d{8}-[^-]+)", r["id"]))})
+
+    def ids(k: str, n: int = 4) -> str:
+        return ("  (" + "، ".join(c[k][:n]) + ("…" if len(c[k]) > n else "") + ")") if c[k] else ""
+    return "\n".join([
+        "📊 الطابور",
+        f"✅ متوافق عليه ومستني النشر: {len(c['approved'])}{ids('approved')}",
+        f"📤 متجدول على المنصات (لسه ميعاده مجاش): {len(c['scheduled'])}",
+        f"🎬 اتنشر: {len(c['published'])}",
+        f"⏳ لسه متوافقش عليه: {len(c['waiting']) + len(c['held'])}"
+        + (f" (منهم {len(c['held'])} المصحح مستنيك فيهم)" if c["held"] else "") + ids("waiting"),
+        f"❌ اترفض: {len(c['rejected'])}",
+        f"⚙️ تحت التجهيز دلوقتي: {jobs['clip']} مقطع لينك" + (f" + تجهيز فيديوهات اليوم" if jobs["daily"] else ""),
+        f"🔗 لينكات/فيديوهات شاركتها مع البوت: {n_shared}",
+    ])
 
 
 def series_records(sid: str) -> list[tuple[Path, dict]]:
@@ -387,6 +457,16 @@ def poll(cfg) -> bool:
             reply = msg.get("reply_to_message")
             if text.startswith("/help"):
                 api("sendMessage", chat_id=me, text=HELP)
+            elif text.startswith("/generate"):
+                m = re.search(r"\d+", text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+                n = max(1, min(GENERATE_MAX, int(m.group()) if m else 3))
+                GENERATE["n"] += n
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text=f"⚙️ هعمل {n} فيديو قرآن جديد (آيات حكمة وصبر ووعظ أغلبها). هيوصلوك هنا للمراجعة "
+                         f"خلال حوالي {3 * n + 5} دقيقة. بعد موافقتك بيدخلوا الطابور ويتنشروا بالترتيب على "
+                         "الأيام الجاية في أحسن المواعيد.")
+            elif text.startswith("/que") or text.startswith("/queue"):
+                api("sendMessage", chat_id=me, text=queue_text(cfg, reviews, state))
             elif text.startswith("/status") or text.startswith("/start"):
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
             elif not reply and (URL_IN.search(text) or _media(msg)):
@@ -401,6 +481,9 @@ def poll(cfg) -> bool:
                     req["file_id"] = media["file_id"]
                 req.update(id=str(msg["message_id"]), msg_id=msg["message_id"])
                 clip_requests.append(req)
+                state.setdefault("shared", []).append({"id": req["id"], "at": datetime.now(timezone.utc)
+                                                       .isoformat(timespec="seconds"),
+                                                       "url": req.get("url"), "file": bool(media)})
                 if req.get("start") is not None:
                     a, b = int(req["start"]), int(req["end"])
                     when = f" من {a // 60}:{a % 60:02d} لـ {b // 60}:{b % 60:02d}"
@@ -448,6 +531,17 @@ def poll(cfg) -> bool:
                     api("sendMessage", chat_id=me,
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
     clip_requests += agent_due(cfg, reviews, state)
+    if state.get("commands") != COMMANDS_VERSION:     # the bot's "/" menu
+        try:
+            import json
+            api("setMyCommands", commands=json.dumps([
+                {"command": "que", "description": "عدد الفيديوهات في كل حالة"},
+                {"command": "generate", "description": "اعمل فيديوهات قرآن جديدة للطابور (مثلا /generate 5)"},
+                {"command": "status", "description": "فيديوهات الأيام الجاية"},
+                {"command": "help", "description": "إزاي تستخدم البوت"}]))
+            state["commands"] = COMMANDS_VERSION
+        except TelegramError as e:
+            log.warning("setMyCommands: %s", e)
     store.save(reviews)
     write_json(STATE, state)
     # handed to the workflow, which starts one clip job per request
@@ -473,11 +567,12 @@ def main(argv=None):
         log.info("sent %d videos for review", send(cfg))
     else:
         rerun = poll(cfg)
-        log.info("poll done, rerun daily: %s", rerun)
+        log.info("poll done, rerun daily: %s, generate: %s", rerun, GENERATE["n"])
         out = os.environ.get("GITHUB_OUTPUT")
         if out:
             with open(out, "a") as f:
                 f.write(f"rerun={'true' if rerun else 'false'}\n")
+                f.write(f"generate={min(GENERATE['n'], GENERATE_MAX) or ''}\n")
 
 
 if __name__ == "__main__":

@@ -33,8 +33,19 @@ def _ok_to_publish(r: dict, reviews: dict | None = None) -> bool:
     return True
 
 
+BACKLOG_DAYS = 14
+
+
 def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
     items: list[tuple[Path, dict]] = []
+    # approved late (after their own day was over) and never published anywhere: they go out
+    # first, oldest first — approving a video always gets it published
+    for back in range(BACKLOG_DAYS, 0, -1):
+        for p in sorted((OUTPUT / (day - timedelta(days=back)).isoformat()).glob("q-*.json")):
+            r = read_json(p, {})
+            # only videos you actually saw in Telegram (old local tests never were)
+            if not r.get("published") and (r.get("telegram") or {}).get("message_id") and _ok_to_publish(r):
+                items.append((p, r))
     for p in sorted((OUTPUT / day.isoformat()).glob("q-*.json")):
         r = read_json(p, {})
         if _ok_to_publish(r):
@@ -66,7 +77,8 @@ def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
         elif sid:
             blocked.add(sid)        # parts go out strictly in order
     items += pending[:n_q]
-    return items
+    # whatever doesn't fit today stays approved and is picked up first tomorrow
+    return items[:int(cfg["publishing"].get("max_per_day", 10))]
 
 
 def video_file(rec_path: Path, r: dict) -> Path:
@@ -144,7 +156,8 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
         times = scheduler.base_times(cfg, rng, len(items), day)
     except ValueError as e:          # approved too late in the day — no window left
         log.info("%s", e)
-        notify.send(f"اتأخر الوقت: {len(items)} فيديو متوافق عليهم النهارده مش هيلحقوا يتنشروا ({e})")
+        notify.send(f"⏭ {len(items)} فيديو متوافق عليهم: مواعيد النشر النهارده خلصت، فهيتنشروا بكرة "
+                    "في أول المواعيد (قبل فيديوهات بكرة).")
         return {"scheduled": 0, "errors": errors}
 
     hist_p = path(cfg, "history")
@@ -279,7 +292,9 @@ def cleanup(cfg) -> None:
         r = read_json(p, {})
         pub = r.get("published") or {}
         h0 = r.get("hosting") or {}
-        stale = not pub and r.get("date", "9999") < (now - timedelta(days=2)).date().isoformat()
+        # never approved and never published after BACKLOG_DAYS (approved ones are kept until they go out)
+        stale = not pub and not review.is_approved(r, reviews) and \
+            r.get("date", "9999") < (now - timedelta(days=BACKLOG_DAYS)).date().isoformat()
         if h0.get("public_id") and not h0.get("deleted") and (review.is_rejected(r, reviews) or stale):
             try:                                  # rejected / never approved: free the space
                 h0["deleted"] = hosting.delete(h0["public_id"])

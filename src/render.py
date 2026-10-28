@@ -64,12 +64,15 @@ def look_filters(tpl: Template, total: float) -> list[str]:
     post = []
     camera = getattr(tpl, "camera", None) or ("zoom_in" if tpl.ken_burns else "still")
     z = 0.08
+    # progress 0..1, clamped: the joined footage can run a little past `total`, and a zoom-out that
+    # shrank below 1080 px there made the following crop crash FFmpeg (segfault, empty stderr)
+    k = f"min(t/{total:.3f},1)"
     if camera == "zoom_in":
-        post.append(f"scale=w='2*trunc({W}*(1+{z}*t/{total:.3f})/2)':h=-2:eval=frame,crop={W}:{H}")
+        post.append(f"scale=w='2*trunc({W}*(1+{z}*{k})/2)':h=-2:eval=frame,crop={W}:{H}")
     elif camera == "zoom_out":
-        post.append(f"scale=w='2*trunc({W}*(1+{z}*(1-t/{total:.3f}))/2)':h=-2:eval=frame,crop={W}:{H}")
+        post.append(f"scale=w='2*trunc({W}*(1+{z}*(1-{k}))/2)':h=-2:eval=frame,crop={W}:{H}")
     elif camera == "pan":     # slow sideways drift across a slightly enlarged frame
-        post.append(f"scale={int(W * 1.14) // 2 * 2}:-2,crop={W}:{H}:x='(iw-ow)*t/{total:.3f}':y=(ih-oh)/2")
+        post.append(f"scale={int(W * 1.14) // 2 * 2}:-2,crop={W}:{H}:x='(iw-ow)*{k}':y=(ih-oh)/2")
     post += GRADES.get(tpl.grade, [])
     if tpl.vignette:
         post.append("vignette=PI/5")

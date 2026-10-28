@@ -18,6 +18,7 @@ from .textrender import TextRenderer
 from .util import ROOT, load_config, path, read_json, setup_logging, write_json
 
 log = logging.getLogger("quran-shorts.main")
+MAX_FAILURES = 4        # replacement attempts per run before giving up (and alerting)
 
 
 def load_passages(cfg) -> list[dict]:
@@ -58,6 +59,7 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
     used_tpl = set(history.setdefault("templates_by_day", {}).get(run_date.isoformat(), []))
     used_cats: set[str] = set()
     results = []
+    failures: list[str] = []
 
     with TextRenderer(cfg) as tr:
         while len(results) < n and passages:
@@ -76,6 +78,12 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
                 log.error("REJECTED %s: %s", key, e)
                 history.setdefault("rejected", {})[key] = str(e)
                 continue
+            except Exception as e:      # audio / API hiccup: take another passage instead of stopping
+                failures.append(f"{key} ({reciter}): {type(e).__name__}: {str(e)[:120]}")
+                log.error("skip %s (%s) after error: %s", key, reciter, e)
+                if len(failures) >= MAX_FAILURES:
+                    break
+                continue
             approx = cfg["video"]["lead_in"] + rec.duration + cfg["video"]["tail"]
             if approx > cfg["video"]["max_duration"] - 0.3:
                 log.info("skip %s (%s): %.1fs too long", key, reciter, approx)
@@ -86,6 +94,8 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
                 idx += 1   # never overwrite an earlier video from the same day
             vid = f"q-{run_date:%Y%m%d}-{idx:02d}"
             tpl = templates.choose(cfg, rng, used_tpl, rec.has_word_times)
+            if failures:                # after a crash: no camera move / extra effects this time
+                tpl = templates.safe(tpl)
             category = force_category or footage.pick_category(cfg, rng, avoid=used_cats)
             clips = footage.get_clips(cfg, category, approx, history, rng)
             amb = ambience.pick(cfg, category, rng)
@@ -97,6 +107,14 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
                 info = compose(cfg, rng, tr, rec, clips, amb, tpl, mp4, work)
             except TooLong as e:
                 log.info("skip: %s", e)
+                continue
+            except Exception as e:      # broken render: drop it and make another one right away
+                mp4.unlink(missing_ok=True)
+                first = (str(e).strip().splitlines() or [""])[0][:120]
+                failures.append(f"{vid} {key}: {type(e).__name__} {first}")
+                log.error("[%s] render failed, making another video instead: %s", vid, e)
+                if len(failures) >= MAX_FAILURES:
+                    break
                 continue
             finally:
                 shutil.rmtree(work, ignore_errors=True)
@@ -139,8 +157,13 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
                 history.setdefault("footage_used", {})[c.id] = run_date.isoformat()
             history["templates_by_day"][run_date.isoformat()] = sorted(used_tpl)
             log.info("[%s] done: %s (%.1fs)", vid, mp4, info["duration"])
+    if failures:
+        from .publish import notify
+        notify.send(f"🔧 {len(failures)} فيديو حصل فيهم عطل أثناء التجهيز واتلغوا، واتعمل بدالهم "
+                    f"({len(results)}/{n} جاهزين):\n" + "\n".join(failures[:5]))
     if len(results) < n:
-        log.error("only %d/%d videos generated (passage pool exhausted?)", len(results), n)
+        log.error("only %d/%d videos generated (passage pool exhausted or %d failures)", len(results), n,
+                  len(failures))
     return results
 
 

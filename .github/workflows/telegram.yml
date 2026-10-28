@@ -43,6 +43,8 @@ jobs:
 
       - name: Read Telegram
         id: poll
+        env:
+          GH_TOKEN: ${{ github.token }}     # /que counts the clip jobs running right now
         run: python -m src.review.telegram poll
 
       - name: Save decisions
@@ -64,8 +66,14 @@ jobs:
             gh workflow run clip.yml -R ${{ github.repository }} -f req="$req"
           done < .cache/clip_requests.jsonl
 
+      - name: Make extra Quran videos (/generate N)
+        if: steps.poll.outputs.generate != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run daily.yml -R ${{ github.repository }} -f count=${{ steps.poll.outputs.generate }}
+
       - name: Schedule approved / replace rejected now
-        if: steps.poll.outputs.rerun == 'true'
+        if: steps.poll.outputs.rerun == 'true' && steps.poll.outputs.generate == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run daily.yml -R ${{ github.repository }}

@@ -225,6 +225,11 @@ captions:
                   "#آيات", "#تلاوة_خاشعة", "#quran", "#shorts", "#اسلام", "#سكينة"]
   hashtag_count: [3, 5]
   footage_credit: false   # Pixabay/Pexels لا يشترطوا ذكر المصدر
+  # وسوم ثابتة على كل الفيديوهات (قرآن ومقاطع)، بعد الوسوم الخاصة بكل فيديو.
+  # يوتيوب بيتجاهل كل الوسوم لو أكتر من 15، فبيتقص لـ 15 هناك؛ إنستجرام حده 30.
+  fixed_hashtags: ["#viral", "#fyp", "#foryou", "#foryourpage", "#quran", "#Hadith", "#reels", "#free",
+                   "#trend", "#trending", "#trendy", "#المنشاوي", "#الحصري", "#الدوسري", "#الاسلام",
+                   "#تلاوة", "#قرأن", "#محمد_صديق_المنشاوي", "#القرأن_الكريم"]
 
 asr:
   model: large-v3-turbo   # على الـ CPU: ~0.7x من الوقت الحقيقي (ساعة صوت ≈ 85 دقيقة)
@@ -277,6 +282,7 @@ publishing:
   friday_windows: ["08:00-11:15 x4", "14:00-16:00 x2", "18:00-19:45 x2", "20:30-22:30 x4", "22:30-23:55 x3"]
   min_gap_minutes: 120           # أقل فرق بين أي فيديوهين
   platform_offset_minutes: [5, 40]  # كل منصة بتاخد نفس الفيديو بفرق عشوائي
+  max_per_day: 10                # أقصى عدد فيديوهات في اليوم؛ اللي ميلحقش بيتنشر بكرة أول حاجة
   min_lead_minutes: 25           # أقل وقت بين الجدولة والنشر (فيسبوك محتاج 10+ دقايق)
   youtube_category: "27"         # Education
   delete_hosted_after_hours: 6   # يمسح الفيديو من Cloudinary بعد النشر بالوقت ده
@@ -296,7 +302,9 @@ agent:
   enabled: true
   provider: gemini            # gemini (مجاني) | claude (مدفوع، محتاج ANTHROPIC_API_KEY)
   # بالترتيب: لو موديل مشغول أو بطيء بيروح للي بعده. gemini-3.5-flash كان الأسرع (7 ث للفة) في التجربة
-  gemini_models: [gemini-3.5-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-flash-latest, gemini-3.5-flash-lite]
+  # flash-lite اتشال: في التجربة وافق على مقطع فيه آية متسمعة غلط. لو كلهم مشغولين المقطع بيستنى ويتجرب بعدين
+  gemini_models: [gemini-3.5-flash, gemini-3.7-flash, gemini-3.8-flash, gemini-flash-latest]
+  max_per_poll: 1            # مقطع واحد كل 20 دقيقة: التشغيل مع بعض بيعدّي حد الطلبات المجاني
   gemini_timeout: 90         # ثواني لكل رد قبل ما يعتبر الموديل مشغول
   model: claude-opus-5-5      # لو provider: claude
   effort: high                # لو provider: claude
