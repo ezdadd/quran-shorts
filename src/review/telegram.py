@@ -47,9 +47,9 @@ def owner() -> str:
     return str(os.environ.get("TELEGRAM_CHAT_ID", "")).strip()
 
 
-def api(method: str, files=None, timeout=60, **params):
+def api(method: str, files=None, http_timeout=60, **params):
     r = requests.post(f"https://api.telegram.org/bot{_token()}/{method}", data=params, files=files,
-                      timeout=timeout)
+                      timeout=http_timeout)
     body = r.json()
     if not body.get("ok"):
         raise TelegramError(f"{method}: {body.get('description')}")
@@ -130,7 +130,7 @@ def send(cfg) -> int:
                 log.warning("%s: cannot send (%s)", r["id"], e)
                 continue
             with open(mp4, "rb") as f:
-                msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, timeout=300,
+                msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
                           chat_id=owner(), caption=_caption(r, reviews), supports_streaming="true",
                           width=1080, height=1920, reply_markup=_kb(r["id"], None))
             r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner()}
