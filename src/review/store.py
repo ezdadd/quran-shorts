@@ -33,18 +33,23 @@ def set_status(reviews: dict, video_id: str, status: str, by: str = "") -> None:
 
 
 def edit_tags(current: list[str], text: str) -> list[str]:
-    """'#a #b' replaces the list; '+#a -#b' adds/removes; works with or without '#'."""
-    words = text.replace("،", " ").replace(",", " ").split()
-    if words and all(w[0] in "+-" for w in words):
-        out = list(current)
-        for w in words:
-            t = "#" + w[1:].lstrip("#＃")
-            if w[0] == "+" and t not in out:
-                out.append(t)
-            elif w[0] == "-":
-                out = [x for x in out if x != t]
-        return out
-    return ["#" + w.lstrip("#＃") for w in words if w.lstrip("#＃")]
+    """'#a #b' replaces the list; any '+x' / '-x' (sign before or after, with or without '#')
+    switches to add/remove mode, where plain tags are added too."""
+    ops = []
+    for w in text.replace("،", " ").replace(",", " ").split():
+        sign = "+" if ("+" in w[:2] or w.endswith("+")) else "-" if (w.startswith("-") or w.endswith("-")) else ""
+        tag = w.strip("+-#＃ ‎‏")
+        if tag:
+            ops.append((sign, "#" + tag))
+    if not any(sign for sign, _ in ops):
+        return [t for _, t in ops]
+    out = list(current)
+    for sign, t in ops:
+        if sign == "-":
+            out = [x for x in out if x != t]
+        elif t not in out:
+            out.append(t)
+    return out
 
 
 def is_rejected(r: dict, reviews: dict) -> bool:
