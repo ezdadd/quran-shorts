@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      update:
+        description: "One Telegram update, passed by the instant bot (worker/bot.js)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -28,6 +33,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       WORKER_URL: ${{ secrets.WORKER_URL }}     # instant bot (worker/bot.js); empty = poll Telegram
       WORKER_KEY: ${{ secrets.WORKER_KEY }}
+      UPDATE_JSON: ${{ inputs.update }}
       AGENT_KEY_SET: ${{ secrets.GEMINI_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' }}
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
       FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}

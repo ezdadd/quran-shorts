@@ -23,7 +23,7 @@ import requests
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from tools.fb_token import set_env  # noqa: E402  (writes KEY=value into .env)
-from src.util import load_config  # noqa: E402,F401  (loads .env into os.environ)
+from src.util import load_config  # noqa: E402
 
 NAME = "ezdadd-bot"
 KV_TITLE = "ezdadd-bot-updates"
@@ -58,6 +58,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--off", action="store_true")
     a = ap.parse_args()
+    load_config()                       # loads .env into the environment
     if a.off:
         tg("deleteWebhook")
         gh_secret("WORKER_URL", "")

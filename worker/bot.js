@@ -65,7 +65,7 @@ async function telegram(req, env, ctx) {
   } else {
     ctx.waitUntil(tg(env, "sendChatAction", { chat_id: chat, action: "typing" }));
   }
-  ctx.waitUntil(dispatch(env));
+  ctx.waitUntil(dispatch(env, u));
   return new Response("ok");
 }
 
@@ -74,12 +74,15 @@ function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<shei
   return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4);
 }
 
-async function dispatch(env) {
+// The update itself rides along with the run (KV *listing* can lag ~60 s behind writes, so the
+// poller would often not see it yet); KV stays the backup for runs that get superseded.
+async function dispatch(env, u) {
+  const update = JSON.stringify(u);
   const r = await fetch(`https://api.github.com/repos/${env.REPO}/actions/workflows/telegram.yml/dispatches`, {
     method: "POST",
     headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: "application/vnd.github+json",
                "user-agent": "ezdadd-bot", "content-type": "application/json" },
-    body: JSON.stringify({ ref: "main" }),
+    body: JSON.stringify({ ref: "main", inputs: update.length < 60000 ? { update } : {} }),
   });
   if (!r.ok) console.log("dispatch failed", r.status, await r.text());
 }

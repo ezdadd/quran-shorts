@@ -323,12 +323,26 @@ def fetch_updates(state: dict) -> tuple[list[dict], bool]:
     up, else straight from Telegram (getUpdates). Returns (updates, came_from_worker)."""
     w, k = os.environ.get("WORKER_URL"), os.environ.get("WORKER_KEY")
     if w and k:
-        try:
+        import json
+        got: dict[int, dict] = {}
+        if os.environ.get("UPDATE_JSON"):           # handed over directly with this run (instant path)
+            try:
+                u = json.loads(os.environ["UPDATE_JSON"])
+                got[u["update_id"]] = u
+            except (ValueError, KeyError):
+                pass
+        try:                                        # plus anything a superseded run left behind
             r = requests.get(w.rstrip("/") + "/updates", headers={"x-worker-key": k}, timeout=30)
             r.raise_for_status()
-            return r.json(), True
+            for u in r.json():
+                got.setdefault(u["update_id"], u)
         except requests.RequestException as e:
-            log.warning("worker unreachable (%s) — trying Telegram directly", e)
+            log.warning("worker unreachable (%s)", e)
+        done = set(state.get("done_ids", []))      # never handle one update twice
+        new = [got[i] for i in sorted(got) if i not in done]
+        state["done_ids"] = sorted(done | set(got))[-500:]
+        state["ack_ids"] = sorted(got)              # delete all of them from the Worker afterwards
+        return new, True
     try:
         return api("getUpdates", offset=state["offset"], timeout=0,
                    allowed_updates='["message","callback_query"]'), False
@@ -836,11 +850,12 @@ def poll(cfg) -> bool:
             log.warning("setMyCommands: %s", e)
     store.save(reviews)
     write_json(STATE, state)
-    if via_worker and updates:          # processed: remove them from the Worker's store
+    if via_worker and state.get("ack_ids"):     # processed: remove them from the Worker's store
         try:
             requests.post(os.environ["WORKER_URL"].rstrip("/") + "/ack", timeout=30,
                           headers={"x-worker-key": os.environ["WORKER_KEY"]},
-                          json={"ids": [u["update_id"] for u in updates]}).raise_for_status()
+                          json={"ids": state.pop("ack_ids")}).raise_for_status()
+            write_json(STATE, state)
         except requests.RequestException as e:
             log.warning("worker ack: %s", e)
     # handed to the workflow, which starts one clip job per request
