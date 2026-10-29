@@ -48,6 +48,13 @@ def main():
         sys.exit(f"exchange failed: {r.get('error', r)}")
     pages = requests.get(f"{g}/me/accounts", params={"access_token": r["access_token"]},
                          timeout=30).json().get("data", [])
+    if not pages and os.environ.get("FB_PAGE_ID"):
+        # a Page managed through a Business portfolio is often missing from /me/accounts, but
+        # asking for it by id still returns its (non-expiring) Page token
+        p = requests.get(f"{g}/{os.environ['FB_PAGE_ID']}", params={"access_token": r["access_token"],
+                         "fields": "id,name,access_token"}, timeout=30).json()
+        if p.get("access_token"):
+            pages = [p]
     if not pages:
         sys.exit("no Pages found — did you grant pages_show_list and pick the Page?")
     for i, pg in enumerate(pages):
