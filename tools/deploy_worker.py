@@ -94,8 +94,10 @@ def main() -> None:
               "bot.js": ("bot.js", code, "application/javascript+module")})
     print("worker uploaded")
     # timekeeper: wake the GitHub poller every 10 min (GitHub's own cron fires ~hourly)
-    cf("PUT", f"/accounts/{acc}/workers/scripts/{NAME}/schedules", json=[{"cron": "*/10 * * * *"}])
-    print("cron trigger: every 10 min")
+    # and start daily.yml every 3 h: the next Quran video for review (MAKE_CRON in bot.js)
+    cf("PUT", f"/accounts/{acc}/workers/scripts/{NAME}/schedules",
+       json=[{"cron": "*/10 * * * *"}, {"cron": "7 */3 * * *"}])
+    print("cron triggers: poller every 10 min, new video every 3 h")
 
     # 3) public URL on workers.dev
     try:

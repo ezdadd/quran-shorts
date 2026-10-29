@@ -42,8 +42,11 @@ def _rand_minute(rng: random.Random, start: datetime, end: datetime) -> datetime
     return start + timedelta(minutes=rng.randint(0, span))
 
 
-def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None = None) -> list[datetime]:
-    """n random times on `day` (Cairo), sorted, >= min_gap apart, all after now + lead."""
+def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None = None,
+               taken: list[datetime] | None = None) -> list[datetime]:
+    """n random times on `day` (Cairo), sorted, >= min_gap apart, all after now + lead, and also
+    min_gap away from posts already scheduled that day (`taken`) — videos now arrive every 3 h."""
+    taken = taken or []
     tz = ZoneInfo(cfg["timezone"])
     p = cfg["publishing"]
     now = (now or datetime.now(tz)).astimezone(tz)
@@ -54,8 +57,8 @@ def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None 
     weights = [w for _, _, w in wins3]
     # many videos in one day: shrink the gap so they still fit inside the peak windows
     window_min = sum((e - s).total_seconds() / 60 for s, e in wins)
-    if n > 1:
-        gap = min(gap, timedelta(minutes=max(20, 0.6 * window_min / n)))
+    if n + len(taken) > 1:
+        gap = min(gap, timedelta(minutes=max(20, 0.6 * window_min / (n + len(taken)))))
     if n == 0:
         return []
     if not wins:
@@ -68,7 +71,8 @@ def base_times(cfg, rng: random.Random, n: int, day: date, now: datetime | None 
         if any(t is None for t in times):
             continue
         times.sort()
-        if all(b - a >= gap for a, b in zip(times, times[1:])):
+        if all(b - a >= gap for a, b in zip(times, times[1:])) and \
+                all(abs(t - x) >= gap for t in times for x in taken):
             return times
     # day too short for the requested gap (e.g. started late): spread evenly instead
     s, e = wins[0][0], wins[-1][1]

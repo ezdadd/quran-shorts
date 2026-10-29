@@ -164,7 +164,13 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     series_off: dict[str, dict] = {}
     series_base: dict[str, datetime] = {}
     try:
-        times = scheduler.base_times(cfg, rng, len(items), day)
+        taken = []                  # posts already scheduled today: keep the new ones away from them
+        for p_ in list((OUTPUT / day.isoformat()).glob("q-*.json")) + list(queue.QUEUE.glob("*.json")):
+            dues = [datetime.fromisoformat(i["due"]) for i in (read_json(p_, {}).get("published") or {}).values()
+                    if i.get("due")]
+            if dues and min(dues).astimezone(tz).date() == day:
+                taken.append(min(dues))
+        times = scheduler.base_times(cfg, rng, len(items), day, taken=taken)
     except ValueError as e:          # approved too late in the day — no window left
         log.info("%s", e)
         notify.send(f"⏭ {len(items)} فيديو متوافق عليهم: مواعيد النشر النهارده خلصت، فهيتنشروا بكرة "

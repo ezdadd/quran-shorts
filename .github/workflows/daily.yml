@@ -1,12 +1,10 @@
 name: daily-shorts
 
-# Every day ~03:00 Cairo: generate today's Quran videos, schedule them (random times) on every
-# platform, publish one approved item from the review queue, clean up yesterday's hosted files,
-# and commit the state (history + records) back to the repo.
+# Every 3 hours (the Cloudflare Worker starts it on time; GitHub's own cron below is only a
+# daily backup): make today's next Quran video(s), send them to Telegram for review, schedule
+# every approved video into today's remaining windows, and commit the state back to the repo.
 on:
   schedule:
-    # 01:07 UTC = 03:07 Cairo in winter (UTC+2) / 04:07 in summer (UTC+3). GitHub may start
-    # scheduled runs a little late; publishing windows start at 07:00, so that is harmless.
     - cron: "7 1 * * *"
   workflow_dispatch:
     inputs:
@@ -108,11 +106,11 @@ jobs:
             python -m src.main --no-publish --generate "$COUNT" ${THEME:+--theme "$THEME"} ${{ inputs.dry_run && '--dry-run' || '' }}
             exit 0
           fi
-          AHEAD=$(python -c "from src.util import load_config; print(load_config()['publishing'].get('days_ahead', 2))")
-          for i in $(seq 0 $AHEAD); do
-            D=$(TZ=Africa/Cairo date -d "+$i day" +%F)
-            python -m src.main --no-publish --top-up --date "$D" ${{ inputs.dry_run && '--dry-run' || '' }}
-          done
+          # every 3 hours (started by the Cloudflare Worker): a few new videos for today, sent to you
+          # right away, until today has daily.quran_count; rejected ones get replaced the same way
+          PER_RUN=$(python -c "from src.util import load_config; print(load_config()['daily'].get('per_run', 1))")
+          D=$(TZ=Africa/Cairo date +%F)
+          python -m src.main --no-publish --top-up --max-new "$PER_RUN" --date "$D" ${{ inputs.dry_run && '--dry-run' || '' }}
 
       - name: Send new videos to Telegram for review
         if: ${{ !inputs.dry_run }}

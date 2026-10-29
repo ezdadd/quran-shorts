@@ -10,6 +10,7 @@
 // Bindings: KV namespace UPDATES. Secrets: TG_TOKEN, TG_SECRET (webhook header), CHAT_ID,
 // WORKER_KEY (for /updates and /ack), GH_TOKEN (actions:write), REPO ("owner/name").
 
+const MAKE_CRON = "7 */3 * * *";   // must match tools/deploy_worker.py
 const MENU_URL = (env) => `https://raw.githubusercontent.com/${env.REPO}/main/data/bot_menu.json`;
 const COUNTS = [1, 3, 5, 10];
 
@@ -26,7 +27,8 @@ export default {
   // Cron trigger (every 10 min): GitHub's own schedule fires only about once an hour, so the
   // Worker keeps time — the 2-hour agent timer and the Quran auto-checks then run on time.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(dispatch(env, null));
+    // "7 */3 * * *": make the next Quran video(s) (daily.yml); every 10 min: the review poller
+    ctx.waitUntil(event.cron === MAKE_CRON ? dispatch(env, null, "daily.yml") : dispatch(env, null));
   },
 };
 
@@ -84,9 +86,9 @@ function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<shei
 
 // The update itself rides along with the run (KV *listing* can lag ~60 s behind writes, so the
 // poller would often not see it yet); KV stays the backup for runs that get superseded.
-async function dispatch(env, u) {
+async function dispatch(env, u, workflow = "telegram.yml") {
   const update = u ? JSON.stringify(u) : "";
-  const r = await fetch(`https://api.github.com/repos/${env.REPO}/actions/workflows/telegram.yml/dispatches`, {
+  const r = await fetch(`https://api.github.com/repos/${env.REPO}/actions/workflows/${workflow}/dispatches`, {
     method: "POST",
     headers: { authorization: `Bearer ${env.GH_TOKEN}`, accept: "application/vnd.github+json",
                "user-agent": "ezdadd-bot", "content-type": "application/json" },

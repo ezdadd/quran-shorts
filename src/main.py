@@ -185,6 +185,7 @@ def main(argv=None):
     ap.add_argument("--date", type=date.fromisoformat, default=None, help="default: today in Cairo")
     ap.add_argument("--top-up", action="store_true",
                     help="only generate what is missing for the day (safe to re-run)")
+    ap.add_argument("--max-new", type=int, help="with --top-up: make at most this many in this run")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
 
@@ -204,6 +205,8 @@ def main(argv=None):
         have = sum(1 for p in (ROOT / cfg["paths"]["output"] / args.date.isoformat()).glob("q-*.json")
                    if not review.is_rejected(read_json(p, {}), revs))
         n = max(0, n - have)
+        if args.max_new is not None:    # spread over the day: a few per run (every 3 hours)
+            n = min(n, args.max_new)
         log.info("top-up %s: %d usable already, generating %d", args.date, have, n)
 
     results = generate_quran(cfg, n, args.date, rng, history, args.dry_run, args.category,
