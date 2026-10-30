@@ -76,7 +76,10 @@ def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
             pending.append((p, r))
         elif sid:
             blocked.add(sid)        # parts go out strictly in order
-    items += pending[:n_q]
+    # hadith videos have their own daily share; link clips / lectures share queue_per_day
+    hadiths = [x for x in pending if x[1].get("kind") == "hadith"]
+    others = [x for x in pending if x[1].get("kind") != "hadith"]
+    items += others[:n_q] + hadiths[:int(cfg["daily"].get("hadith_per_day", 2))]
     # whatever doesn't fit today stays approved and is picked up first tomorrow
     return items[:int(cfg["publishing"].get("max_per_day", 10))]
 

@@ -41,6 +41,16 @@ def _themes(cfg) -> list[str]:
     return list((cfg.get("quran") or {}).get("theme_weights") or {})
 
 
+def _hadith_topics() -> list[str]:
+    """Topics in data/hadiths.json (read directly: the poller doesn't load the video code)."""
+    seen: list[str] = []
+    for h in (read_json(ROOT / "data" / "hadiths.json", {}).get("hadiths") or {}).values():
+        for t in h.get("topics") or [] if h.get("keep") else []:
+            if t not in seen:
+                seen.append(t)
+    return seen
+
+
 def _reciters(cfg) -> list[tuple[str, str]]:
     """(id, label) for every reciter usable from the menu (not the ones that need a human check)."""
     out = []
@@ -73,7 +83,7 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
     p = data.split(":")
     if data == "g:t":
         return ("⚙️ عايز تعمل إيه؟", _gen_kb([[("📖 آيات قرآن", "g:q")],
-                                            [("📜 حديث (قريبًا)", "g:h")],
+                                            [("📜 حديث شريف", "g:h")],
                                             [("🎙 مقطع من لينك", "g:l")],
                                             [("📊 الطابور (/que)", "g:que")]]))
     if data == "g:q":
@@ -82,6 +92,16 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
         rows += [[(t, f"g:q:{i}") for i, t in enumerate(th)][k:k + 2] for k in range(0, len(th), 2)]
         rows += [[("✍️ سورة وآيات بالاسم", "g:s")], [("⬅️ رجوع", "g:t")]]
         return "📖 آيات قرآن — اختار الموضوع، أو اكتب سورة وآيات بعينها:", _gen_kb(rows)
+    if data == "g:h":                   # hadith: topic -> count
+        ht = _hadith_topics()
+        rows = [[("🎲 أي موضوع", "g:h:-")]]
+        rows += [[(t, f"g:h:{i}") for i, t in enumerate(ht)][k:k + 2] for k in range(0, len(ht), 2)]
+        rows.append([("⬅️ رجوع", "g:t")])
+        return ("📜 حديث شريف (صحيح أو حسن بس، بمصدره ودرجته) — اختار الموضوع:", _gen_kb(rows))
+    if p[1] == "h" and len(p) == 3:
+        name = "أي موضوع" if p[2] == "-" else _hadith_topics()[int(p[2])]
+        return (f"📜 {name}\nكام فيديو؟", _gen_kb([[(str(n), f"{data}:{n}") for n in (1, 2, 3, 5)],
+                                                  [("⬅️ رجوع", "g:h")]]))
     theme = lambda t: "أي موضوع" if t == "-" else _themes(cfg)[int(t)]          # noqa: E731
     reciter = lambda r: "أي شيخ" if r == "-" else _reciters(cfg)[int(r)][1]     # noqa: E731
     if p[1] == "q" and len(p) == 3:
@@ -116,9 +136,12 @@ def generate_callback(cfg, cq: dict) -> None:
         except TelegramError:
             pass
         return
-    if data == "g:h":
-        text, kb, note = ("📜 فيديوهات الأحاديث لسه بتتعمل: هتكون من مصادر موثقة بس (بدرجة الصحة والتخريج)، "
-                          "وأول ما تجهز هتظهر هنا."), _gen_kb([[("⬅️ رجوع", "g:t")]]), "قريبًا"
+    if p[1] == "h" and len(p) == 4:     # hadith topic + count -> start
+        topic = "" if p[2] == "-" else _hadith_topics()[int(p[2])]
+        n = max(1, min(GENERATE_MAX, int(p[3])))
+        GENERATE.append({"kind": "hadith", "count": n, "theme": topic, "reciter": "", "passage": ""})
+        text, note = (f"✅ هعمل {n} فيديو حديث" + (f" عن «{topic}»" if topic else "") +
+                      f".\nهيوصلوك هنا للمراجعة خلال حوالي {2 * n + 5} دقيقة."), "اتبدأ"
     elif data == "g:l":
         text, kb = ("🎙 ابعت اللينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه هنا في الشات، وممكن تضيف:\n"
                     "• وقت: 1:20-2:05\n• الشيخ ...\n• عنوان: ...\n"
@@ -303,7 +326,11 @@ def _caption(r: dict, reviews: dict) -> str:
     cap = store.final_caption(r, "tiktok", reviews)
     tpl = r.get("template", "")
     head = f"🗓 {r.get('date', '')}   🆔 {r['id']}"
-    if r.get("kind") == "clip":
+    if r.get("kind") == "hadith":
+        hd = r.get("hadith") or {}
+        head += f"\n📜 حديث · {hd.get('attribution', '')} · {hd.get('grade', '')}" + \
+            (f"\n🏷 {r['topic']}" if r.get("topic") else "") + (f"\n🔗 {hd['source']}" if hd.get("source") else "")
+    elif r.get("kind") == "clip":
         head += "\n🎙 مقطع من لينك" + (f" · {r['sheikh_name']}" if r.get("sheikh_name") else "")
         if r.get("series"):
             head += f"\n📚 الجزء {r['series']['part']} من {r['series']['of']}"
@@ -365,7 +392,8 @@ def write_menu_data(cfg) -> None:
     """data/bot_menu.json — the themes and sheikhs the Worker shows in the /generate menu
     (same order as here, so the button numbers mean the same thing on both sides)."""
     path = ROOT / "data" / "bot_menu.json"
-    data = {"themes": _themes(cfg), "reciters": [list(x) for x in _reciters(cfg)]}
+    data = {"themes": _themes(cfg), "reciters": [list(x) for x in _reciters(cfg)],
+            "hadith_topics": _hadith_topics()}
     if read_json(path, None) != data:
         write_json(path, data)
 
@@ -375,7 +403,13 @@ def quran_check(cfg, r: dict) -> str | None:
     (The ayah text itself was already verified against two sources when the video was made.)"""
     from ..publish import hosting
     v = cfg["video"]
-    if not r.get("ayat") or any(not a.get("text") for a in r["ayat"]):
+    if r.get("kind") == "hadith":       # text exactly as HadeethEnc gives it, authentic grades only
+        hd = r.get("hadith") or {}
+        if not hd.get("text") or not hd.get("attribution"):
+            return "نص الحديث أو مصدره ناقص"
+        if not any(g in (hd.get("grade") or "") for g in ("صحيح", "حسن")):
+            return f"درجة الحديث مش صحيح/حسن ({hd.get('grade')})"
+    elif not r.get("ayat") or any(not a.get("text") for a in r["ayat"]):
         return "نص الآيات ناقص"
     if not 5 <= float(r.get("duration") or 0) <= float(v["max_duration"]) + 1:
         return f"مدة الفيديو غلط ({r.get('duration')} ث)"
@@ -425,7 +459,7 @@ def quran_auto(cfg, reviews: dict, today: str) -> bool:
     now = datetime.now(timezone.utc)
     delay = timedelta(hours=float(pc.get("auto_approve_hours", 2)))
     rerun = False
-    for p in sorted(OUTPUT.glob("*/q-*.json")):
+    for p in sorted(OUTPUT.glob("*/q-*.json")) + sorted((ROOT / "queue").glob("h-*.json")):   # Quran + hadith
         r = read_json(p, {})
         tg = r.get("telegram") or {}
         if not tg.get("message_id") or r.get("published") or r.get("rejected") or r.get("review_required") \
@@ -939,7 +973,8 @@ def main(argv=None):
             for g in GENERATE:
                 n = min(g["count"], left)
                 if n > 0:
-                    jobs.append({k: g.get(k, "") for k in ("theme", "reciter", "passage")} | {"count": n})
+                    jobs.append({k: g.get(k, "") for k in ("theme", "reciter", "passage")} |
+                                {"count": n, "kind": g.get("kind", "quran")})
                     left -= n
             (ROOT / ".cache" / "generate_jobs.json").write_text(json.dumps(jobs, ensure_ascii=False),
                                                                  encoding="utf-8")

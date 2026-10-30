@@ -44,7 +44,7 @@ html,body{margin:0;padding:0;background:transparent;width:1080px;height:1920px;o
 .w.hide,.m.hide{visibility:hidden}
 .m,.g{white-space:nowrap}
 .br{font-family:"B";color:var(--accent)}
-.lbl{position:absolute;left:0;right:0;text-align:center;direction:rtl;font-family:"L";
+.lbl{position:absolute;left:70px;right:70px;text-align:center;direction:rtl;font-family:"L";
      color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.85)}
 .pill{display:inline-block;padding:.18em .9em .28em;border-radius:999px;background:rgba(0,0,0,.38);
       font-weight:700;letter-spacing:.02em;text-shadow:0 1px 3px rgba(0,0,0,.7)}

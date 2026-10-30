@@ -80,8 +80,8 @@ async function telegram(req, env, ctx) {
 
 function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<sheikh>  (g:que: needs the repo)
   if (d === "g:que") return true;
-  const p = d.split(":");
-  return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4);
+  const p = d.split(":");          // ... or g:h:<topic>:<count> (hadith)
+  return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4) || (p[1] === "h" && p.length === 4);
 }
 
 // The update itself rides along with the run (KV *listing* can lag ~60 s behind writes, so the
@@ -138,15 +138,20 @@ async function menu(env, data) {
   const sheikhRows = (prefix, back) => [[["🎲 أي شيخ", `${prefix}:-`]],
     ...pairs(m.reciters.map(([, label], i) => [label, `${prefix}:${i}`])), [["⬅️ رجوع", back]]];
   if (data === "g:t")
-    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث (قريبًا)", "g:h"]], [["🎙 مقطع من لينك", "g:l"]],
+    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث شريف", "g:h"]], [["🎙 مقطع من لينك", "g:l"]],
                                      [["📊 الطابور (/que)", "g:que"]]])];
   if (data === "g:q")
     return ["📖 آيات قرآن — اختار الموضوع، أو اكتب سورة وآيات بعينها:",
             kb([[["🎲 أي موضوع (الأغلب حكمة وصبر ووعظ)", "g:q:-"]], ...pairs(m.themes.map((t, i) => [t, `g:q:${i}`])),
                 [["✍️ سورة وآيات بالاسم", "g:s"]], [["⬅️ رجوع", "g:t"]]])];
   if (data === "g:h")
-    return ["📜 فيديوهات الأحاديث لسه بتتعمل: هتكون من مصادر موثقة بس (بدرجة الصحة والتخريج)، وأول ما تجهز هتظهر هنا.",
-            kb([[["⬅️ رجوع", "g:t"]]])];
+    return ["📜 حديث شريف (صحيح أو حسن بس، بمصدره ودرجته) — اختار الموضوع:",
+            kb([[["🎲 أي موضوع", "g:h:-"]], ...pairs((m.hadith_topics || []).map((t, i) => [t, `g:h:${i}`])),
+                [["⬅️ رجوع", "g:t"]]])];
+  if (p[1] === "h" && p.length === 3) {
+    const name = p[2] === "-" ? "أي موضوع" : (m.hadith_topics || [])[+p[2]];
+    return [`📜 ${name}\nكام فيديو؟`, kb([[1, 2, 3, 5].map((n) => [String(n), `${data}:${n}`]), [["⬅️ رجوع", "g:h"]]])];
+  }
   if (data === "g:l")
     return ["🎙 ابعت اللينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه هنا في الشات، وممكن تضيف:\n" +
             "• وقت: 1:20-2:05\n• الشيخ ...\n• عنوان: ...\nالأطول من دقيقة بيتقسم أجزاء ورا بعض.", kb([[["⬅️ رجوع", "g:t"]]])];
@@ -165,7 +170,7 @@ async function sendMenu(env, chat) {
 
 async function menuStep(env, cq) {
   const step = await menu(env, cq.data);
-  await tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: cq.data === "g:h" ? "قريبًا" : "" });
+  await tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "" });
   if (!step) return;
   await tg(env, "editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
                                      text: step[0], reply_markup: step[1] });
