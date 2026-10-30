@@ -39,10 +39,10 @@ def match(text: str, heard: str) -> float:
     return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
-def _speak(model: str, voice: str, text: str, out: Path) -> Path:
+def _speak(model: str, voice: str, text: str, out: Path, style: str = STYLE) -> Path:
     r = requests.post(f"{BASE}/models/{model}:generateContent", timeout=180,
                       headers={"x-goog-api-key": os.environ.get("GEMINI_API_KEY", "")},
-                      json={"contents": [{"parts": [{"text": f"{STYLE}\n{text}"}]}],
+                      json={"contents": [{"parts": [{"text": f"{style}\n{text}"}]}],
                             "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {
                                 "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}}}})
     if not r.ok:
@@ -58,7 +58,8 @@ def _speak(model: str, voice: str, text: str, out: Path) -> Path:
     return out
 
 
-def narrate(cfg, text: str, work: Path) -> tuple[Path, list[dict], str]:
+def narrate(cfg, text: str, work: Path, voice: str | None = None,
+            style: str = STYLE) -> tuple[Path, list[dict], str]:
     """(wav, whisper words [{w, s, e}], model) for a reading that passed the check."""
     from . import asr
     h = cfg.get("hadith") or {}
@@ -70,7 +71,7 @@ def narrate(cfg, text: str, work: Path) -> tuple[Path, list[dict], str]:
         for attempt in range(2):
             out = work / f"voice_{model}_{attempt}.wav"
             try:
-                _speak(model, h.get("voice", "Charon"), text, out)
+                _speak(model, voice or h.get("voice", "Charon"), text, out, style)
             except (TTSError, requests.RequestException, KeyError, subprocess.CalledProcessError) as e:
                 errors.append(str(e)[:120])
                 break

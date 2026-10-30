@@ -54,6 +54,8 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}    # hadith narration + footage modesty check
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}     # kids' story pictures (Workers AI)
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       HF_HOME: ${{ github.workspace }}/.cache/hf
       ASR_THREADS: "4"
 
@@ -127,6 +129,10 @@ jobs:
                 python -m src.hadith --generate "$N" ${T:+--topic "$T"} || echo "job failed: $j"
                 continue
               fi
+              if [ "$(echo "$j" | jq -r '.kind // "quran"')" = "kids" ]; then
+                python -m src.kids --generate "$N" || echo "job failed: $j"
+                continue
+              fi
               python -m src.main --no-publish --generate "$N" ${T:+--theme "$T"} ${R:+--reciter "$R"} \
                 ${P:+--passage "$P"} || echo "job failed: $j"
             done
@@ -144,6 +150,7 @@ jobs:
           # and a hadith video now and then (daily.hadith_per_day); it is sent for review by itself
           if [ "${{ inputs.dry_run }}" != "true" ]; then
             python -m src.hadith --top-up --max-new 1 || echo "hadith step failed"
+            python -m src.kids --top-up --max-new 1 || echo "kids step failed"
           fi
 
       - name: Send new videos to Telegram for review

@@ -33,7 +33,7 @@ TUNING = ROOT / "data" / "tuning.json"
 COLLECT_DAYS = 14
 MIN_SAMPLES = 5
 PLATFORM_AR = {"youtube": "يوتيوب", "tiktok": "تيك توك", "instagram": "إنستجرام", "facebook": "فيسبوك"}
-KIND_AR = {"quran": "📖 قرآن", "hadith": "📜 حديث", "clip": "🎙 مقاطع"}
+KIND_AR = {"quran": "📖 قرآن", "hadith": "📜 حديث", "kids": "🧒 أطفال", "clip": "🎙 مقاطع"}
 
 
 # ---------------------------------------------------------------- records
@@ -51,7 +51,7 @@ def meta(r: dict, cfg) -> dict:
     tz = ZoneInfo(cfg["timezone"])
     dues = [datetime.fromisoformat(i["due"]) for i in r["published"].values() if i.get("due")]
     first = min(dues).astimezone(tz) if dues else None
-    kind = "hadith" if r.get("kind") == "hadith" else "clip" if r.get("kind") == "clip" or r.get("type") == "lecture" \
+    kind = r["kind"] if r.get("kind") in ("hadith", "kids") else "clip" if r.get("kind") == "clip" or r.get("type") == "lecture" \
         else "quran"
     cat = r.get("category") or ((r.get("footage") or [{}])[0].get("category") if isinstance(
         (r.get("footage") or [None])[0], dict) else None)

@@ -210,6 +210,25 @@ def test_quran_check_catches_broken_videos(monkeypatch):
     assert telegram.quran_check(cfg, h)                             # weak hadith never passes
 
 
+def test_kids_story_rules(monkeypatch):
+    """The model's story never carries the hadith or forbidden characters; only short kid topics are picked."""
+    from src import hadith, kids
+    h = next(x for x in hadith.load() if x["words"] <= 20 and "الأخلاق" in (x.get("topics") or []))
+    story = {"suitable": True, "title": "t", "moral": "درس", "closing_image": "c",
+             "scenes": [{"narration": "ذهب عمر إلى الحديقة", "image": "a"}, {"narration": "ساعد عمر جاره", "image": "b"}]}
+    monkeypatch.setattr(kids, "_gemini", lambda *a, **k: json.loads(json.dumps(story)))
+    assert len(kids.write_story(h, random.Random(1))["scenes"]) == 2
+    for bad in ({"suitable": False}, {"scenes": [{"narration": "قالت أمه له", "image": "a"}] * 2},
+                {"scenes": [{"narration": "قال النبي", "image": "a"}] * 2}):
+        monkeypatch.setattr(kids, "_gemini", lambda *a, b=bad, **k: story | b)
+        with pytest.raises(kids.KidsError):
+            kids.write_story(h, random.Random(1))
+    for _ in range(20):
+        p = kids.pick({}, random.Random())
+        assert p["words"] <= 20 and set(p["topics"]) & set(kids.KID_TOPICS)
+    assert "no " not in kids.STYLE.lower()          # Flux draws whatever it is told not to
+
+
 def test_clip_job_parses_its_request(monkeypatch):
     """Regression for the UnboundLocalError: main() must get as far as making the clip."""
     from src import clips

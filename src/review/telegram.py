@@ -87,6 +87,7 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
     if data == "g:t":
         return ("⚙️ عايز تعمل إيه؟", _gen_kb([[("📖 آيات قرآن", "g:q")],
                                             [("📜 حديث شريف", "g:h")],
+                                            [("🧒 قصة للأطفال (حديث)", "g:k")],
                                             [("🎙 مقطع من لينك", "g:l")],
                                             [("📊 الطابور (/que)", "g:que")]]))
     if data == "g:q":
@@ -101,6 +102,9 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
         rows += [[(t, f"g:h:{i}") for i, t in enumerate(ht)][k:k + 2] for k in range(0, len(ht), 2)]
         rows.append([("⬅️ رجوع", "g:t")])
         return ("📜 حديث شريف (صحيح أو حسن بس، بمصدره ودرجته) — اختار الموضوع:", _gen_kb(rows))
+    if data == "g:k":                   # kids' story: count only
+        return ("🧒 قصة مرسومة للأطفال بتشرح حديث صحيح (الحديث بنصه، والقصة والرسوم بالذكاء الاصطناعي) — كام فيديو؟",
+                _gen_kb([[(str(n), f"g:k:{n}") for n in (1, 2, 3)], [("⬅️ رجوع", "g:t")]]))
     if p[1] == "h" and len(p) == 3:
         name = "أي موضوع" if p[2] == "-" else _hadith_topics()[int(p[2])]
         return (f"📜 {name}\nكام فيديو؟", _gen_kb([[(str(n), f"{data}:{n}") for n in (1, 2, 3, 5)],
@@ -145,6 +149,10 @@ def generate_callback(cfg, cq: dict) -> None:
         GENERATE.append({"kind": "hadith", "count": n, "theme": topic, "reciter": "", "passage": ""})
         text, note = (f"✅ هعمل {n} فيديو حديث" + (f" عن «{topic}»" if topic else "") +
                       f".\nهيوصلوك هنا للمراجعة خلال حوالي {2 * n + 5} دقيقة."), "اتبدأ"
+    elif p[1] == "k" and len(p) == 3:   # kids' story + count -> start
+        n = max(1, min(3, int(p[2])))
+        GENERATE.append({"kind": "kids", "count": n, "theme": "", "reciter": "", "passage": ""})
+        text, note = f"✅ هعمل {n} قصة للأطفال.\nهيوصلوك هنا للمراجعة خلال حوالي {4 * n + 5} دقيقة.", "اتبدأ"
     elif data == "g:l":
         text, kb = ("🎙 ابعت اللينك (تيك توك / فيسبوك / إنستجرام / يوتيوب) أو الفيديو نفسه هنا في الشات، وممكن تضيف:\n"
                     "• وقت: 1:20-2:05\n• الشيخ ...\n• عنوان: ...\n"
@@ -332,7 +340,12 @@ def _caption(r: dict, reviews: dict) -> str:
     cap = store.final_caption(r, "tiktok", reviews)
     tpl = r.get("template", "")
     head = f"🗓 {r.get('date', '')}   🆔 {r['id']}"
-    if r.get("kind") == "hadith":
+    if r.get("kind") == "kids":
+        hd = r.get("hadith") or {}
+        head += f"\n🧒 قصة للأطفال: {(r.get('story') or {}).get('title', '')}\n📜 {hd.get('attribution', '')} · " \
+            f"{hd.get('grade', '')}" + (f"\n🔗 {hd['source']}" if hd.get("source") else "") + \
+            "\n👀 القصة والرسوم معمولة بالذكاء الاصطناعي — بصّ عليها قبل الموافقة"
+    elif r.get("kind") == "hadith":
         hd = r.get("hadith") or {}
         head += f"\n📜 حديث · {hd.get('attribution', '')} · {hd.get('grade', '')}" + \
             (f"\n🏷 {r['topic']}" if r.get("topic") else "") + (f"\n🔗 {hd['source']}" if hd.get("source") else "")
@@ -409,7 +422,7 @@ def quran_check(cfg, r: dict) -> str | None:
     (The ayah text itself was already verified against two sources when the video was made.)"""
     from ..publish import hosting
     v = cfg["video"]
-    if r.get("kind") == "hadith":       # text exactly as HadeethEnc gives it, authentic grades only
+    if r.get("kind") in ("hadith", "kids"):   # text exactly as HadeethEnc gives it, authentic grades only
         hd = r.get("hadith") or {}
         if not hd.get("text") or not hd.get("attribution"):
             return "نص الحديث أو مصدره ناقص"
@@ -465,7 +478,7 @@ def quran_auto(cfg, reviews: dict, today: str) -> bool:
     now = datetime.now(timezone.utc)
     delay = timedelta(hours=float(pc.get("auto_approve_hours", 2)))
     rerun = False
-    for p in sorted(OUTPUT.glob("*/q-*.json")) + sorted((ROOT / "queue").glob("h-*.json")):   # Quran + hadith
+    for p in sorted(OUTPUT.glob("*/q-*.json")) + sorted((ROOT / "queue").glob("[hk]-*.json")):   # Quran, hadith, kids
         r = read_json(p, {})
         tg = r.get("telegram") or {}
         if not tg.get("message_id") or r.get("published") or r.get("rejected") or r.get("review_required") \

@@ -80,8 +80,9 @@ async function telegram(req, env, ctx) {
 
 function isFinal(d) {     // g:q:<theme>:<sheikh>:<count>  or  g:P:<s.a-b>:<sheikh>  (g:que: needs the repo)
   if (d === "g:que") return true;
-  const p = d.split(":");          // ... or g:h:<topic>:<count> (hadith)
-  return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4) || (p[1] === "h" && p.length === 4);
+  const p = d.split(":");          // ... or g:h:<topic>:<count> (hadith), g:k:<count> (kids)
+  return (p[1] === "q" && p.length === 5) || (p[1] === "P" && p.length === 4) || (p[1] === "h" && p.length === 4) ||
+    (p[1] === "k" && p.length === 3);
 }
 
 // The update itself rides along with the run (KV *listing* can lag ~60 s behind writes, so the
@@ -138,7 +139,8 @@ async function menu(env, data) {
   const sheikhRows = (prefix, back) => [[["🎲 أي شيخ", `${prefix}:-`]],
     ...pairs(m.reciters.map(([, label], i) => [label, `${prefix}:${i}`])), [["⬅️ رجوع", back]]];
   if (data === "g:t")
-    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث شريف", "g:h"]], [["🎙 مقطع من لينك", "g:l"]],
+    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث شريف", "g:h"]], [["🧒 قصة للأطفال (حديث)", "g:k"]],
+                                     [["🎙 مقطع من لينك", "g:l"]],
                                      [["📊 الطابور (/que)", "g:que"]]])];
   if (data === "g:q")
     return ["📖 آيات قرآن — اختار الموضوع، أو اكتب سورة وآيات بعينها:",
@@ -148,6 +150,9 @@ async function menu(env, data) {
     return ["📜 حديث شريف (صحيح أو حسن بس، بمصدره ودرجته) — اختار الموضوع:",
             kb([[["🎲 أي موضوع", "g:h:-"]], ...pairs((m.hadith_topics || []).map((t, i) => [t, `g:h:${i}`])),
                 [["⬅️ رجوع", "g:t"]]])];
+  if (data === "g:k")
+    return ["🧒 قصة مرسومة للأطفال بتشرح حديث صحيح (الحديث بنصه، والقصة والرسوم بالذكاء الاصطناعي) — كام فيديو؟",
+            kb([[1, 2, 3].map((n) => [String(n), `g:k:${n}`]), [["⬅️ رجوع", "g:t"]]])];
   if (p[1] === "h" && p.length === 3) {
     const name = p[2] === "-" ? "أي موضوع" : (m.hadith_topics || [])[+p[2]];
     return [`📜 ${name}\nكام فيديو؟`, kb([[1, 2, 3, 5].map((n) => [String(n), `${data}:${n}`]), [["⬅️ رجوع", "g:h"]]])];
