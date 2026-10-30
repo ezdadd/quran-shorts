@@ -41,6 +41,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Records from the private repo
+        env:
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: bash tools/state.sh pull
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -63,11 +68,7 @@ jobs:
         run: python -m src.health --check || true
 
       - name: Save
+        env:
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
         run: |
-          git config user.name "quran-shorts bot"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/stats.json data/tuning.json 2>/dev/null || git add data/stats.json || true
-          if ! git diff --cached --quiet; then
-            git commit -m "stats: $(TZ=Africa/Cairo date '+%F %H:%M')"
-            for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 10; done
-          fi
+          bash tools/state.sh save "stats: $(TZ=Africa/Cairo date '+%F %H:%M')"

@@ -19,3 +19,19 @@ output/visual_test/
 output/_*
 output/*.png
 output/*.jpg
+
+# the bot's records live in the private repo (tools/state.sh), never here
+_state/
+queue/
+output/
+data/history.json
+data/reviews.json
+data/telegram_state.json
+data/sources.json
+data/sources_seen.json
+data/stats.json
+data/tuning.json
+data/sounds.json
+data/footage_checks.json
+data/corrections/
+data/sheikhs/
