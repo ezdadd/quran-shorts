@@ -1,6 +1,10 @@
-"""Clips from links: a sheikh's advice, a famous recitation, a trending religious clip — taken as
-AUDIO ONLY and rebuilt on our own visuals (nature footage + waveform + synced subtitles; any Quran
-quotation is shown with the exact verified text). Runs on GitHub Actions, started from Telegram.
+"""Clips from links: a sheikh's advice, a famous recitation, a trending religious clip, rebuilt as
+our own video with synced subtitles (any Quran quotation shown with the exact verified text).
+Runs on GitHub Actions, started from Telegram.
+
+  * a link / video you share in Telegram ("screen": true): the clip itself plays on a device in one
+    of our scenes — a laptop on a desk, a phone, a TV... (src/screens.py), each with its own look
+  * the daily TikTok sources: AUDIO ONLY, over our nature footage + waveform
 
     python -m src.clips --req '{"id": "...", "url": "...", "start": 80, "end": 125,
                                 "sheikh": "الشيخ ...", "title": "...", "n": 1}'
@@ -57,6 +61,8 @@ def fetch_audio(cfg, req: dict, work: Path) -> tuple[Path, dict]:
     import yt_dlp
     opts = {"format": "bestaudio/best", "outtmpl": str(work / "src.%(ext)s"), "quiet": True,
             "noplaylist": True, "no_warnings": True, "retries": 3}
+    if req.get("screen"):               # the picture is needed too (it plays on the device's screen)
+        opts.update(format="bv*[height<=1280]+ba/b[height<=1280]/b", merge_output_format="mp4")
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(req["url"], download=True)
@@ -79,6 +85,24 @@ def cut_audio(src: Path, out: Path, start: float = 0.0, dur: float | None = None
                                                                            "-c:a", "libmp3lame", "-q:a", "2",
                                                                            str(out)]
     run_ffmpeg(args, "cut clip audio")
+    return out
+
+
+def video_size(p: Path) -> tuple[int, int] | None:
+    """(width, height) of the picture, or None for a file without one."""
+    import cv2
+    cap = cv2.VideoCapture(str(p))
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    ok = cap.read()[0]
+    cap.release()
+    return (w, h) if ok and w and h else None
+
+
+def cut_video(src: Path, out: Path, start: float = 0.0, dur: float | None = None) -> Path:
+    args = ["-ss", f"{start:.3f}"] + (["-t", f"{dur:.3f}"] if dur else []) + [
+        "-i", str(src), "-vf", "scale=-2:'min(1280,ih)'", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-c:a", "aac", "-b:a", "192k", str(out)]
+    run_ffmpeg(args, "cut clip video")
     return out
 
 
@@ -148,6 +172,8 @@ def make_clips(cfg, req: dict) -> list[Path]:
         A, B = 0.0, min(total, max_parts * hi + 30)
     truncated = B < total - 1 and req.get("start") is None
     audio = cut_audio(src, work / "part.mp3", A, B - A)
+    size = video_size(src) if req.get("screen") and not req.get("sound_name") else None
+    media = cut_video(src, work / "part.mp4", A, B - A) if size else audio
     # a library sound without speech (song, nature...): no transcription, no subtitles
     words = [] if req.get("no_subs") else asr.transcribe(cfg, audio)
     from .agent import memory
@@ -204,11 +230,13 @@ def make_clips(cfg, req: dict) -> list[Path]:
                 "sheikh_photo": _library_photo(req.get("sheikh")),   # sent before for this sheikh
                 "title": title,
                 "series": {"id": sid, "part": k + 1, "of": len(windows), "truncated": truncated} if series else None,
-                "source": {"file": str(audio.relative_to(ROOT)).replace("\\", "/"),
-                           "url": info.get("webpage_url") or req.get("url"), "channel": info.get("uploader")},
+                "source": {"file": str(media.relative_to(ROOT)).replace("\\", "/"),
+                           "url": info.get("webpage_url") or req.get("url"), "channel": info.get("uploader"),
+                           "file_id": req.get("file_id"), "offset": round(A, 3)},
                 "source_credit": info.get("uploader"),
                 "clip": {"start": round(pad_a, 3), "end": round(pad_b, 3), "score": 0},
-                "layout": "audio", "face_x": None, "flags": flags,
+                "layout": "screen" if size else "audio", "portrait": bool(size and size[1] > size[0]),
+                "face_x": None, "flags": flags,
                 "transcript": " ".join(w["w"] for w in ws),
                 "sound": req.get("sound_name"),          # made on request from the sounds library
             }
@@ -255,8 +283,28 @@ def _clip_audio(cfg, r: dict, vid: str) -> Path:
     return audio
 
 
+def _screen_source(cfg, r: dict, vid: str) -> Path | None:
+    """The clip's own picture + sound again (a 'screen' clip shows the original video): downloaded
+    from its link / Telegram file and cut to the same moment."""
+    s = r["source"]
+    work = cache_dir(cfg, "clips", "edit-" + vid)
+    try:
+        src, _ = fetch_audio(cfg, {"url": s.get("url"), "file_id": s.get("file_id"), "screen": True}, work)
+        a = float(s.get("offset") or 0) + r["clip"]["start"]
+        return cut_video(src, work / "screen_src.mp4", a, r["clip"]["end"] - r["clip"]["start"])
+    except Exception as e:
+        log.warning("[%s] original video unavailable (%s) — re-rendering on our footage instead", vid, e)
+        return None
+
+
 def _rerender(cfg, r: dict, vid: str, audio: Path, stamp: str = "edited_at") -> tuple[Path, dict]:
     """Render the clip again from `audio` with r's (edited) subtitles, re-host it, re-queue it."""
+    if r.get("layout") == "screen":
+        video = _screen_source(cfg, r, vid)
+        if video:
+            audio = video
+        else:
+            r["layout"] = "audio"
     dur = media_duration(audio)
     orig_source, orig_clip = r["source"], r["clip"]
     r["source"] = {**orig_source, "file": str(audio.relative_to(ROOT)).replace("\\", "/")}

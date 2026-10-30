@@ -331,7 +331,28 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
     # ---- video base
     args = ["-ss", f"{start:.3f}", "-t", f"{total:.3f}", "-i", str(src)]
     fc = []
-    if is_video and layout == "crop":
+    geo = None
+    if is_video and layout == "screen":
+        # the clip itself playing on a device in one of our scenes (laptop, phone, TV...); a retry
+        # takes another scene and a plain look
+        from . import screens
+        if not rec.get("screen") or attempt:
+            old = (rec.get("screen") or {}).get("scene")
+            look = screens.choose(cfg, random.Random(f"{rec['id']}#{attempt}"), rec.get("portrait", True),
+                                  {old} if old and attempt else set())
+            rec["screen"] = screens.safe(look) if attempt else look
+        base = work / "screen.mp4"
+        try:
+            geo = screens.compose(cfg, rec["screen"], src, start, total, base, work)
+        except screens.NoPicture as e:      # nothing to show on a screen: its sound on our footage
+            log.info("[%s] %s — using our footage instead", rec["id"], e)
+            rec["layout"], is_video = "audio", False
+            rec.pop("screen", None)
+    if geo:
+        args = ["-i", str(base)]
+        fc.append(f"[0:v]fps={FPS},setsar=1[base]")
+        sub_y = geo["sub_y"]
+    elif is_video and layout == "crop":
         cx = rec.get("face_x") or 0.5
         fc.append(f"[0:v]crop=ih*9/16:ih:'max(0,min(iw-ih*9/16,{cx}*iw-ih*9/32))':0,"
                   f"scale={W}:{H},setsar=1,fps={FPS}[base]")
@@ -364,11 +385,18 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
     tr.use_fonts((sub or {}).get("file", SUB_FONT), label_font=tpl.label_font)
     b = cfg.get("branding", {})
     photo = ROOT / rec["sheikh_photo"] if rec.get("sheikh_photo") else None
-    photo = photo if photo and photo.exists() else None
+    photo = photo if photo and photo.exists() and not geo else None    # the sheikh is on screen already
     title_y = 470 if photo else 120          # the framed photo takes the top of the screen
-    labels = [{"text": rec["title"], "y": title_y, "size": 50}] if rec.get("title") else []
-    labels += [{"text": rec["sheikh_name"], "y": b.get("y", 1735) - 75, "size": 42},
-               {"text": b.get("handle", ""), "y": b.get("y", 1735), "size": b.get("size", 32), "pill": True}]
+    if geo:                                  # screen look: a hook line above the device, own style
+        hook = " · ".join(x for x in (rec.get("title") or random.Random(rec["id"]).choice(
+            (cfg.get("clips") or {}).get("openers") or ["اسمع الكلام ده"]), rec.get("sheikh_name")) if x)
+        ts = rec["screen"].get("title", "plain")
+        labels = [{"text": hook, "y": geo["title_y"], "size": 62 if ts == "plain" else 52,
+                   **({"box": ts[4:]} if ts.startswith("box_") else {})}]
+    else:
+        labels = [{"text": rec["title"], "y": title_y, "size": 50}] if rec.get("title") else []
+        labels.append({"text": rec["sheikh_name"], "y": b.get("y", 1735) - 75, "size": 42})
+    labels.append({"text": b.get("handle", ""), "y": b.get("y", 1735), "size": b.get("size", 32), "pill": True})
     labels = [x for x in labels if x["text"]]
     lab_png = work / "_labels.png"
     lab = tr.labels(labels)

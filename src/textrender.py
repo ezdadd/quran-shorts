@@ -50,6 +50,11 @@ html,body{margin:0;padding:0;background:transparent;width:1080px;height:1920px;o
      text-shadow:0 2px 3px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8)}
 .pill{display:inline-block;padding:.18em .9em .28em;border-radius:999px;background:rgba(0,0,0,.38);
       font-weight:700;letter-spacing:.02em;text-shadow:0 1px 3px rgba(0,0,0,.7)}
+.tbox{display:inline;padding:.1em .5em .2em;border-radius:.3em;line-height:1.75;font-weight:700;
+      -webkit-text-stroke:0;text-shadow:none;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.tbox.white{background:#fff;color:#111}
+.tbox.black{background:rgba(0,0,0,.74);color:#fff}
+.tbox.gold{background:#F2D27A;color:#1a1408}
 </style></head><body><div id="stage"></div>
 <script>
 async function useFonts(q, l, b){
@@ -122,6 +127,7 @@ function labels(items){
     // isolate Latin runs ("@EZDADD") so RTL layout doesn't move the @ to the wrong side
     const txt=it.text.replace(/[@A-Za-z0-9_.]+/g,m=>"⁦"+m+"⁩");
     if(it.pill){ const s=document.createElement("span"); s.className="pill"; s.textContent=txt; d.appendChild(s); }
+    else if(it.box){ const s=document.createElement("span"); s.className="tbox "+it.box; s.textContent=txt; d.appendChild(s); }
     else d.textContent=txt;
     st.appendChild(d);
   }

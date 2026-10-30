@@ -229,6 +229,54 @@ def test_kids_story_rules(monkeypatch):
     assert "no " not in kids.STYLE.lower()          # Flux draws whatever it is told not to
 
 
+def test_screen_scene_choice_matches_the_clip(monkeypatch):
+    from src import screens
+    lib = {"p1": {"portrait": True, "kind": "phone"}, "p2": {"portrait": True, "kind": "phone"},
+           "l1": {"portrait": False, "kind": "laptop"}}
+    monkeypatch.setattr(screens, "library", lambda: lib)
+    for i in range(40):
+        look = screens.choose({}, random.Random(i), clip_portrait=False)
+        assert look["scene"] == "l1" and look["frame"] in ("close", "tall", "wide")   # never a tiny phone
+        look = screens.choose({}, random.Random(i), clip_portrait=True, avoid={"p1"})
+        assert look["scene"] != "p1"
+    assert screens.safe(look)["camera"] == "still"
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs FFmpeg")
+def test_screen_composite_leaves_no_green(tmp_path, monkeypatch):
+    """A clip warped onto a green screen seen in perspective: no green left, the clip shows there."""
+    import cv2
+    import numpy as np
+    from src import screens
+    from src.util import load_config, run_ffmpeg
+    quad = np.int32([[700, 300], [1250, 330], [1230, 700], [690, 680]])
+    vw = cv2.VideoWriter(str(tmp_path / "scene.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 30, (1920, 1080))
+    for _ in range(90):
+        f = np.full((1080, 1920, 3), 110, np.uint8)
+        cv2.fillConvexPoly(f, quad, (40, 230, 40))
+        vw.write(f)
+    vw.release()
+    clip = tmp_path / "clip.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "color=c=red:s=640x360:d=3", "-f", "lavfi", "-i", "sine=f=440:d=3",
+                "-c:v", "libx264", "-c:a", "aac", "-shortest", str(clip)], "test clip")
+    monkeypatch.setattr(screens, "scene_file", lambda cfg, sid: tmp_path / "scene.mp4")
+    look = {"scene": "t", "frame": "close", "camera": "push", "grade": "warm", "vignette": True, "grain": False,
+            "round": True, "backdrop": "blur", "title": "plain", "crop": [0, 0, 1, 1]}   # no face to zoom on
+    with pytest.raises(screens.NoPicture):          # a clip with no one on screen goes on our footage
+        screens.focus(clip, 0, 3, 1.7)
+    out = tmp_path / "out.mp4"
+    geo = screens.compose(load_config(), look, clip, 0.5, 2.0, out, tmp_path)
+    assert geo["top"] == screens.TOP and geo["sub_y"] > geo["bottom"]
+    cap = cv2.VideoCapture(str(out))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 30)
+    ok, fr = cap.read()
+    assert ok and fr.shape[:2] == (1920, 1080)
+    hsv = cv2.cvtColor(fr, cv2.COLOR_BGR2HSV)
+    assert cv2.countNonZero(cv2.inRange(hsv, (40, 120, 80), (85, 255, 255))) < 200          # green gone
+    red = cv2.inRange(hsv, (0, 120, 80), (10, 255, 255)) | cv2.inRange(hsv, (170, 120, 80), (180, 255, 255))
+    assert cv2.countNonZero(red) > 50000                                                       # clip on screen
+
+
 def test_clip_job_parses_its_request(monkeypatch):
     """Regression for the UnboundLocalError: main() must get as far as making the clip."""
     from src import clips

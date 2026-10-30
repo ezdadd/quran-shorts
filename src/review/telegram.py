@@ -965,7 +965,8 @@ def poll(cfg) -> bool:
                             text="الملف أكبر من 20 ميجا (حد تيليجرام للبوتات). ابعت لينك بداله أو قص الجزء المطلوب.")
                         continue
                     req["file_id"] = media["file_id"]
-                req.update(id=str(msg["message_id"]), msg_id=msg["message_id"])
+                req.update(id=str(msg["message_id"]), msg_id=msg["message_id"],
+                           screen=bool((cfg.get("screens") or {}).get("enabled", True)))
                 clip_requests.append(req)
                 state.setdefault("shared", []).append({"id": req["id"], "at": datetime.now(timezone.utc)
                                                        .isoformat(timespec="seconds"),
@@ -976,8 +977,8 @@ def poll(cfg) -> bool:
                 else:
                     when = " (هختار أحسن جزء: جملة كاملة 20-60 ث)"
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
-                    text=f"✅ استلمت{when}. هاخد الصوت بس وأركبه على فيديو من عندنا بترجمة، "
-                         "وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
+                    text=f"✅ استلمت{when}. هشغّله على شاشة (لابتوب / موبايل / تلفزيون) في مشهد من عندنا "
+                         "بترجمة، وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
             elif reply and msg.get("photo"):    # a sheikh's photo for a clip -> circular Islamic frame
                 m = ID_RE.search(reply.get("caption") or reply.get("text") or "")
                 vid = m.group(1) if m else ""
