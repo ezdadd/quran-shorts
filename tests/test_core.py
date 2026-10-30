@@ -26,12 +26,16 @@ def test_every_file_parses():
         ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
 
 
+LOCAL_ONLY = {"src.panel"}      # the PC control panel (needs Flask) — never runs on GitHub
+
+
 def test_every_module_imports():
     """Catches a missing import / typo at module level before a job hits it."""
     import importlib
     import src
     for m in pkgutil.walk_packages(src.__path__, "src."):
-        importlib.import_module(m.name)
+        if m.name not in LOCAL_ONLY:
+            importlib.import_module(m.name)
 
 
 def test_no_local_import_shadows_a_module_level_import():
