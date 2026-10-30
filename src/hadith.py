@@ -181,7 +181,7 @@ def captions(cfg, rng: random.Random, h: dict) -> dict:
             tags.append("#shorts")
         body = f"قال رسول الله ﷺ:\n{words}\n{src_line}\n\n{' '.join(tags)}"
         out[p] = {"caption": body, "hashtags": tags}
-    short = words.strip("«»").split()
+    short = re.sub(r"[«»]", "", words).rstrip(".،").split()
     out["youtube"]["title"] = ("حديث شريف | " + " ".join(short[:12]) + ("…" if len(short) > 12 else ""))[:100]
     return out
 
