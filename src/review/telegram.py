@@ -269,7 +269,7 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
    ويوافق لوحده — إلا لو فيه آية أو حديث مش واضح أو مش واثق، ساعتها بيستناك. الآيات والأحاديث مش بيلمسها.
    ↩️ أو ❌ بعدها بيلغوا موافقته.
 /generate 5  اعمل 5 فيديوهات قرآن جديدة جاهزة للطابور (من 1 لـ 10)
-🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (أي صوت: كلام، أغنية، طبيعة...) — /sounds تشوفها
+🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (أي صوت) — /sounds تسمع / 🎬 تعمل منه فيديو / تمسح
 🖼 رد على مقطع لينك بصورة الشيخ (واكتب اسمه) = تتحط في إطار إسلامي دائري
 /que عدد الفيديوهات في كل حالة (متوافق ومستني النشر، اتنشر، مرفوض، مستني موافقتك، تحت التجهيز، اللي شاركته)
 /status حالة الفيديوهات"""
@@ -559,7 +559,7 @@ def send_one(cfg, path: Path) -> None:
                   width=1080, height=1920, reply_markup=_kb(r["id"], None))
     r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner(),
                      "sent_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-    if r.get("kind") == "clip":
+    if r.get("kind") == "clip" and any(s.get("type") == "speech" for s in r.get("segments") or []):
         from .edit import numbered_text
         t = api("sendMessage", chat_id=owner(), text=numbered_text(r), reply_to_message_id=msg["message_id"])
         r["telegram"]["text_msg_id"] = t["message_id"]
@@ -597,6 +597,8 @@ def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
         r = read_json(p, {})
         if r.get("kind") != "clip" and r.get("type") != "lecture":
             continue
+        if not any(s.get("type") == "speech" for s in r.get("segments") or []):
+            continue                    # no subtitles to correct (a sound without speech)
         e = store.get(r["id"], reviews)
         if r.get("published") or r.get("auto") or r.get("edited_at") or e.get("status") \
                 or e.get("tags") is not None or not (r.get("telegram") or {}).get("message_id"):
@@ -794,6 +796,14 @@ def poll(cfg) -> bool:
                 elif name and op == "del":
                     clip_requests.append({"id": f"sdel-{u['update_id']}", "sound_del": name})
                     api("sendMessage", chat_id=me, text=f"🗑 هيتمسح الصوت «{name}» خلال دقيقة.")
+                elif name and op == "make":     # 🎬 a new video from this sound (the only way it is used)
+                    spoken = lib[name].get("kind", "unknown") in ("speech", "mixed", "nasheed", "unknown")
+                    clip_requests.append({"id": f"sv{u['update_id']}", "direct_url": lib[name]["url"],
+                                          "sound_name": name, "no_subs": not spoken})
+                    api("sendMessage", chat_id=me,
+                        text=f"🎬 بعمل فيديو بالصوت «{name}» على مشاهدنا" +
+                             (" بترجمة للكلام" if spoken else " (من غير ترجمة)") +
+                             " — هيوصلك هنا للمراجعة خلال حوالي 10 دقايق.")
                 try:
                     api("answerCallbackQuery", callback_query_id=cq["id"])
                 except TelegramError:
@@ -868,8 +878,9 @@ def poll(cfg) -> bool:
                 else:
                     rows = [[{"text": f"▶️ {n} · {KIND_LABEL.get(lib[n].get('kind', 'unknown'), '❔')} ({int(lib[n].get('duration', 0))} ث)",
                               "callback_data": f"s:play:{i}"},
+                             {"text": "🎬", "callback_data": f"s:make:{i}"},
                              {"text": "🗑", "callback_data": f"s:del:{i}"}] for i, n in enumerate(names)][:40]
-                    api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — الأصوات الهادية (🌿 طبيعة / 🌫 خلفية) بس اللي بتتحط تحت الأحاديث المقروءة:",
+                    api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — ▶️ تسمع · 🎬 تعمل منه فيديو على مشاهدنا · 🗑 تمسح\n(الأصوات دي مش بتدخل في فيديوهات القرآن والأحاديث أبدًا)",
                         reply_markup=json.dumps({"inline_keyboard": rows}))
             elif not reply and (m_snd := re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$",
                                                     text or msg.get("caption") or "")) \

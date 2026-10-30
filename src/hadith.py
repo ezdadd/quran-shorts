@@ -183,8 +183,7 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
         lab = work / "_labels.png"
         tr.labels([x for x in labels if x["text"]]).save(lab)
 
-    from . import sounds                     # one of our library sounds under the narration, else nature
-    amb = (sounds.pick(cfg, "hadith", rng, work) if voice else None) or ambience.pick(cfg, category, rng)
+    amb = ambience.pick(cfg, category, rng)  # rule: never a sound from the shared library here
     out = OUT / f"{vid}.mp4"
     OUT.mkdir(parents=True, exist_ok=True)
     args = ["-i", str(bg), "-f", "concat", "-safe", "0", "-i", str(concat), "-loop", "1", "-t", f"{total:.3f}",

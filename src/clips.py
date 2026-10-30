@@ -37,7 +37,11 @@ from .clip_request import URL_RE, parse_request  # noqa: F401  (re-exported)
 
 # ------------------------------------------------------------------ fetching audio
 def fetch_audio(cfg, req: dict, work: Path) -> tuple[Path, dict]:
-    """Download the source audio (yt-dlp for links, Bot API for files sent in the chat)."""
+    """Download the source audio (yt-dlp for links, Bot API for files sent in the chat, plain download
+    for a sound from our library)."""
+    if req.get("direct_url"):
+        from .util import download
+        return download(req["direct_url"], work / "src.mp3"), {"uploader": None, "title": None, "webpage_url": None}
     if req.get("file_id"):
         from .review import telegram
         f = telegram.api("getFile", file_id=req["file_id"])
@@ -144,18 +148,24 @@ def make_clips(cfg, req: dict) -> list[Path]:
         A, B = 0.0, min(total, max_parts * hi + 30)
     truncated = B < total - 1 and req.get("start") is None
     audio = cut_audio(src, work / "part.mp3", A, B - A)
-    words = asr.transcribe(cfg, audio)
+    # a library sound without speech (song, nature...): no transcription, no subtitles
+    words = [] if req.get("no_subs") else asr.transcribe(cfg, audio)
     from .agent import memory
     fixed = memory.apply_rules(words, memory.rules(int((cfg.get("agent") or {}).get("learn_min_count", 2))))
     if fixed:
         log.info("applied %d learned fixes from your past corrections", fixed)
     base = A
-    if not words:
+    plain = not words
+    if plain and not req.get("sound_name"):
         raise ClipError("مفيش كلام مفهوم في المقطع ده")
 
     windows: list[tuple[float, float]]
     series = False
-    if B - A <= hi + 5:
+    if plain:                                                # equal parts of <= one minute, in order
+        n = max(1, -(-int(B - A) // hi))
+        windows = [(A + (B - A) * k / n, A + (B - A) * (k + 1) / n) for k in range(n)][:max_parts]
+        series = len(windows) > 1
+    elif B - A <= hi + 5:
         windows = [(A, B)]                                   # one minute or less: one Reel
     elif req.get("n"):                                       # "3 مقاطع": the best N moments
         chosen = pick(candidates(words, lo, hi), int(req["n"]))
@@ -171,13 +181,18 @@ def make_clips(cfg, req: dict) -> list[Path]:
     with TextRenderer(cfg) as tr:
         for k, (a, b) in enumerate(windows):
             rel_a, rel_b = a - base, b - base
-            ws = [w for w in words if w["s"] >= rel_a - 0.05 and w["e"] <= rel_b + 0.3]
-            if not ws:
-                raise ClipError("مفيش كلام مفهوم في الجزء ده")
-            w0 = words.index(ws[0])
-            clip = {"start": ws[0]["s"], "end": ws[-1]["e"], "w0": w0, "w1": w0 + len(ws), "score": 0}
-            segs, flags = build_segments(cfg, words, clip)
-            pad_a, pad_b = max(0.0, clip["start"] - 0.15), clip["end"] + 0.35
+            if plain:
+                ws, segs, flags = [], [], []
+                clip = {"start": rel_a, "end": rel_b}
+                pad_a, pad_b = rel_a, rel_b
+            else:
+                ws = [w for w in words if w["s"] >= rel_a - 0.05 and w["e"] <= rel_b + 0.3]
+                if not ws:
+                    raise ClipError("مفيش كلام مفهوم في الجزء ده")
+                w0 = words.index(ws[0])
+                clip = {"start": ws[0]["s"], "end": ws[-1]["e"], "w0": w0, "w1": w0 + len(ws), "score": 0}
+                segs, flags = build_segments(cfg, words, clip)
+                pad_a, pad_b = max(0.0, clip["start"] - 0.15), clip["end"] + 0.35
             sid = f"c-{today:%Y%m%d}-{rid}"
             cid = sid + (f"-p{k + 1:02d}" if series else (f"-{k + 1}" if len(windows) > 1 else ""))
             title = req.get("title") or ""
@@ -195,6 +210,7 @@ def make_clips(cfg, req: dict) -> list[Path]:
                 "clip": {"start": round(pad_a, 3), "end": round(pad_b, 3), "score": 0},
                 "layout": "audio", "face_x": None, "flags": flags,
                 "transcript": " ".join(w["w"] for w in ws),
+                "sound": req.get("sound_name"),          # made on request from the sounds library
             }
             for s in segs:      # segment times relative to the padded clip start
                 d = clip["start"] - pad_a
@@ -418,8 +434,7 @@ def main(argv=None):
                 s = sounds.add(cfg, req["sound"], req)
                 msg = (f"🔊 اتحفظ الصوت «{req['sound']}» ({int(s['duration'])} ث) — "
                        f"{sounds.KINDS.get(s['kind'], '❔')}" + (f": {s['summary']}" if s.get("summary") else "") +
-                       "\n/sounds تشوف المكتبة." + ("\n🌿 هادي، فممكن يتحط خلفية تحت الأحاديث المقروءة."
-                                                 if s["kind"] in sounds.BED_KINDS else ""))
+                       "\n/sounds تشوف المكتبة، و🎬 جنب أي صوت يعمل منه فيديو.")
             except sounds.SoundError as e:
                 msg = f"🔊 الصوت «{req['sound']}» متحفظش: {e}"
             if chat:

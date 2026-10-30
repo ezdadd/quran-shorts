@@ -3,9 +3,10 @@ with a caption "صوت: <name>" — someone talking, a song, a nasheed, nature, 
 Cloudinary (quran-shorts/sounds/), listed in data/sounds.json, shown with /sounds.
 
 Nothing is refused: Gemini listens once and labels the sound (speech / music / nasheed / nature /
-mixed) so the list stays organised. Only calm background sounds (nature, ambient) are ever placed
-automatically under a narrated hadith — a voice or a song there would clash with the narration —
-and nothing is ever mixed under Quran recitation.
+mixed) so the list stays organised.
+
+RULE: Quran and hadith videos never use these sounds. A library sound is used only when you ask for
+it — the 🎬 button in /sounds makes a new video from that sound on our footage (src/clips.py).
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ PATH = ROOT / "data" / "sounds.json"
 MAX_SECONDS = 180
 KINDS = {"speech": "🗣 كلام", "music": "🎵 موسيقى/أغنية", "nasheed": "🎤 نشيد", "nature": "🌿 طبيعة",
          "ambient": "🌫 خلفية هادية", "mixed": "🔀 مختلط", "unknown": "❔"}
-BED_KINDS = ("nature", "ambient")          # the only kinds put under a narrated hadith
+SPOKEN = ("speech", "mixed", "nasheed", "unknown")   # worth transcribing into subtitles
 
 
 class SoundError(Exception):
@@ -106,20 +107,3 @@ def remove(name: str) -> bool:
         log.warning("delete sound %s: %s", name, e)
     write_json(PATH, lib)
     return True
-
-
-def pick(cfg, use: str, rng, work: Path) -> Path | None:
-    """A random calm library sound (nature / ambient only) for `use` ("hadith"), or None."""
-    if use not in ((cfg.get("sounds") or {}).get("use_in") or []):
-        return None
-    lib = {k: v for k, v in load().items() if v.get("kind") in BED_KINDS}
-    if not lib or rng.random() > float((cfg.get("sounds") or {}).get("chance", 0.7)):
-        return None
-    name = rng.choice(sorted(lib))
-    from .util import download
-    safe = re.sub(r"\W+", "_", name, flags=re.U)
-    try:
-        return download(lib[name]["url"], work / f"bed_{safe}.mp3")
-    except Exception as e:
-        log.warning("sound %s unavailable: %s", name, e)
-        return None
