@@ -461,9 +461,8 @@ def main(argv=None):
             telegram.send_series_summary(cfg, queued)
     except AgentError as e:             # the agent could not finish: the clip just waits for you
         log.error("agent: %s", e)
-        if chat:
-            import json
-            vid = req.get("autofix")
+        if chat:                        # (json is imported at module level — a local import here
+            vid = req.get("autofix")    # made `json` unbound for the whole of main())
             telegram.api("sendMessage", chat_id=chat,
                          text=f"🤖 المصحح مقدرش يراجع 🆔 {vid}: {e}\nالمقطع مستني موافقتك زي الأول، "
                               "أو دوس «أعد التصحيح» يجرب تاني دلوقتي.",
