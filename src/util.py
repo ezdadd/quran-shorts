@@ -35,7 +35,42 @@ def setup_logging(verbose: bool = False) -> None:
 def load_config() -> dict:
     load_dotenv(ROOT / ".env")
     with open(ROOT / "config.yaml", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    _apply_tuning(cfg)
+    return cfg
+
+
+def _apply_tuning(cfg: dict) -> None:
+    """Multipliers learned from views (src/stats.py -> data/tuning.json) on top of config.yaml's
+    weights. config.yaml stays exactly as you wrote it; delete data/tuning.json to undo."""
+    p = ROOT / "data" / "tuning.json"
+    if not p.exists():
+        return
+    try:
+        t = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return
+    tw = (cfg.get("quran") or {}).get("theme_weights") or {}
+    for k, m in (t.get("theme_weights") or {}).items():
+        if k in tw:
+            tw[k] = float(tw[k]) * float(m)
+    cw = (cfg.get("footage") or {}).get("category_weights") or {}
+    for k, m in (t.get("category_weights") or {}).items():
+        if k in cw:
+            cw[k] = float(cw[k]) * float(m)
+    for k, m in (t.get("reciter_weights") or {}).items():
+        r = (cfg.get("reciters") or {}).get(k)
+        if r and float(r.get("weight", 1)) > 0:        # a disabled reciter stays disabled
+            r["weight"] = float(r.get("weight", 1)) * float(m)
+    ww = t.get("window_weights") or {}
+    for key in ("windows", "friday_windows"):
+        out = []
+        for w in (cfg.get("publishing") or {}).get(key) or []:
+            span, _, wt = w.partition(" x")
+            m = float(ww.get(span.strip(), 1))
+            out.append(f"{span.strip()} x{float(wt or 1) * m:.2f}" if m != 1 else w)
+        if out:
+            cfg["publishing"][key] = out
 
 
 def path(cfg: dict, key: str) -> Path:

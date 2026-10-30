@@ -30,7 +30,7 @@ log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
-COMMANDS_VERSION = 4
+COMMANDS_VERSION = 5
 KIND_LABEL = {"speech": "🗣 كلام", "music": "🎵 موسيقى/أغنية", "nasheed": "🎤 نشيد", "nature": "🌿 طبيعة",
               "ambient": "🌫 خلفية هادية", "mixed": "🔀 مختلط", "unknown": "❔"}   # = sounds.KINDS
 GENERATE: list[dict] = []   # /generate requests in this poll -> one daily.yml run with the job list
@@ -869,6 +869,10 @@ def poll(cfg) -> bool:
                          "الأيام الجاية في أحسن المواعيد.")
             elif text.startswith("/que") or text.startswith("/queue"):
                 api("sendMessage", chat_id=me, text=queue_text(cfg, reviews, state))
+            elif text.startswith("/report"):    # latest collected numbers (collected daily)
+                from ..stats import report
+                m = re.search(r"\d+", text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
+                api("sendMessage", chat_id=me, text=report(cfg, int(m.group()) if m else 7))
             elif text.startswith("/sounds"):
                 import json
                 lib = read_json(ROOT / "data" / "sounds.json", {})
@@ -996,6 +1000,7 @@ def poll(cfg) -> bool:
                 {"command": "que", "description": "عدد الفيديوهات في كل حالة"},
                 {"command": "generate", "description": "اعمل فيديوهات قرآن جديدة للطابور (مثلا /generate 5)"},
                 {"command": "sounds", "description": "مكتبة الأصوات (تسمع / تمسح)"},
+                {"command": "report", "description": "تقرير المشاهدات (مثلا /report 30)"},
                 {"command": "status", "description": "فيديوهات الأيام الجاية"},
                 {"command": "help", "description": "إزاي تستخدم البوت"}]))
             state["commands"] = COMMANDS_VERSION

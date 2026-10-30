@@ -265,7 +265,8 @@ def make(cfg, n: int, topic: str | None = None) -> list[Path]:
                "file": str(mp4.relative_to(ROOT)).replace("\\", "/"), "duration": info["duration"],
                "hadith": {k_: h.get(k_) for k_ in ("id", "title", "intro", "text", "attribution", "grade", "source")},
                "topic": topic or (h.get("topics") or [""])[0], "template": info["look"],
-               "footage": info["footage"], "ambience": info["ambience"], "narration": info["narration"],
+               "footage": info["footage"], "category": info["category"], "ambience": info["ambience"],
+               "narration": info["narration"],
                "platforms": captions(cfg, rng, h), "published": {}, "approved": False}
         rp = OUT / f"{vid}.json"
         write_json(rp, rec)
