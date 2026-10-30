@@ -102,9 +102,34 @@ def _pages(tr: TextRenderer, words: list[str], kw: dict) -> list[list[str]]:
     return out
 
 
+LEAD, TAIL = 0.8, 1.8
+
+
+def _voice(cfg, h: dict, work: Path) -> tuple[Path, list[dict], str, int] | None:
+    """Narration that passed the Whisper check, or None (-> text-only video). Also returns how many
+    spoken words come before the Prophet's words (the intro), to time the screens."""
+    if not (cfg.get("hadith") or {}).get("narrate", True):
+        return None
+    from . import tts
+    intro, body = split_intro(h)
+    attr = h.get("attribution") or ""
+    spoken = " ".join(x for x in (intro, body, attr if len(attr.split()) <= 6 else "") if x)
+    try:
+        wav, words, model = tts.narrate(cfg, spoken, work)
+    except Exception as e:                  # no voice that reads it exactly: text only, never a misreading
+        log.warning("narration failed (%s) — text-only video", e)
+        return None
+    return wav, words, model, len(intro.split())
+
+
 def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[Path, dict]:
-    total = round(reading_seconds(h["words"]), 2)
+    from .util import media_duration
     work = cache_dir(cfg, "work", vid)
+    voice = _voice(cfg, h, work)
+    if voice and LEAD + media_duration(voice[0]) + TAIL > 59:
+        log.warning("narration too long for a Short — text-only video")
+        voice = None
+    total = round(LEAD + media_duration(voice[0]) + TAIL, 2) if voice else round(reading_seconds(h["words"]), 2)
     tpl = templates.choose_clip(cfg, rng)
     tf = cfg["templates"]["fonts"]               # fonts made for full tashkeel (same as the ayat)
     font = templates._pick(rng, {k: v["weight"] for k, v in tf.items()})
@@ -125,15 +150,29 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
         intro, body = split_intro(h)
         words = body.split()
         pages = _pages(tr, words, kw)
-        t = 0.6
-        span = total - 1.4
-        for pw in pages:
-            dur = span * len(pw) / len(words)
+        if voice:                           # each screen appears when the voice reaches its words
+            heard, n_intro = voice[1], voice[3]
+            n_spoken = n_intro + len(words)
+            def at(i: int) -> float:
+                k = min(len(heard) - 1, round(i * len(heard) / max(1, n_spoken)))
+                return LEAD + heard[k]["s"] if heard else LEAD
+            starts, i = [], n_intro
+            for pw in pages:
+                starts.append(at(i) - 0.25)
+                i += len(pw)
+            starts[0] = min(starts[0], LEAD + 0.3)      # first screen right away, under the intro
+            ends = starts[1:] + [total - 0.5]
+        else:
+            starts, t, span = [], 0.6, total - 1.4
+            for pw in pages:
+                starts.append(t)
+                t += span * len(pw) / len(words)
+            ends = starts[1:] + [total - 0.8]
+        for pw, a, b_ in zip(pages, starts, ends):
             info = tr.layout_ayah(pw, None, max_h=MAX_H, **kw)
-            fr = Frame(tr.state(info).image, t, t + dur)   # one screen at a time, faded in / out
+            fr = Frame(tr.state(info).image, a, b_)    # one screen at a time, faded in / out
             fr.fade_in = fr.fade_out = True
             frames.append(fr)
-            t += dur
         concat = write_concat(frames, total, work, tpl.entrance)
         b = cfg.get("branding", {})
         src_line = " · ".join(x for x in (h.get("attribution"), h.get("grade")) if x)
@@ -150,16 +189,25 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
             "-i", str(lab)]
     if amb:
         args += ["-stream_loop", "-1", "-i", str(amb)]
-        a_in = "[3:a]"
     else:                                   # platforms want an audio track: quiet silence
         args += ["-f", "lavfi", "-t", f"{total:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
-        a_in = "[3:a]"
+    bed = (f"[3:a]atrim=0:{total:.3f},asetpts=N/SR/TB,aresample=48000,aformat=channel_layouts=stereo,"
+           f"loudnorm=I=-20:TP=-2,afade=t=in:d=1.5,afade=t=out:st={total - 2:.3f}:d=2")
     fc = [f"[1:v]fps={FPS},format=rgba[txt]", "[2:v]format=rgba,fade=t=in:st=0.2:d=0.6:alpha=1[lab]",
           "[0:v][txt]overlay=0:0:format=auto[v1]",
           f"[v1][lab]overlay=0:0:format=auto,fade=t=in:st=0:d=0.5,fade=t=out:st={total - 0.7:.3f}:d=0.7,"
-          f"format=yuv420p[vout]",
-          f"{a_in}atrim=0:{total:.3f},asetpts=N/SR/TB,aresample=48000,aformat=channel_layouts=stereo,"
-          f"loudnorm=I=-20:TP=-2,afade=t=in:d=1.5,afade=t=out:st={total - 2:.3f}:d=2[aout]"]
+          f"format=yuv420p[vout]"]
+    if voice:                               # the narration on top, nature sounds low underneath
+        args += ["-i", str(voice[0])]
+        ms = int(LEAD * 1000)
+        lo, hi = cfg["ambience"]["level_db"]
+        fc += [f"{bed},volume={rng.uniform(lo, hi):.1f}dB[amb]",
+               f"[4:a]adelay={ms}|{ms},apad=whole_dur={total:.3f},aresample=48000,aformat=channel_layouts=stereo,"
+               f"loudnorm=I=-16:TP=-1.5:LRA=11[vo]",
+               f"[vo][amb]amix=inputs=2:normalize=0:duration=first,loudnorm=I=-14:TP=-1.5:LRA=11,"
+               f"aresample=48000,atrim=0:{total:.3f}[aout]"]
+    else:
+        fc.append(f"{bed}[aout]")
     v = cfg["video"]
     run_ffmpeg([*args, "-filter_complex", ";".join(fc), "-map", "[vout]", "-map", "[aout]", "-t", f"{total:.3f}",
                 "-r", str(FPS), "-c:v", "libx264", "-preset", v["preset"], "-crf", str(v["crf"]),
@@ -167,7 +215,9 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
                 "-b:a", v["audio_bitrate"], "-movflags", "+faststart", str(out)], "hadith compose")
     look = tpl.to_dict() | {"applied_color": color, "applied_background": style, "text_zone_luma": round(luma, 3)}
     return out, {"duration": total, "look": look, "footage": [c.id for c in clips], "category": category,
-                 "ambience": amb.name if amb else None}
+                 "ambience": amb.name if amb else None,
+                 "narration": {"model": voice[2], "voice": (cfg.get("hadith") or {}).get("voice", "Charon")}
+                 if voice else None}
 
 
 def captions(cfg, rng: random.Random, h: dict) -> dict:
@@ -212,7 +262,7 @@ def make(cfg, n: int, topic: str | None = None) -> list[Path]:
                "file": str(mp4.relative_to(ROOT)).replace("\\", "/"), "duration": info["duration"],
                "hadith": {k_: h.get(k_) for k_ in ("id", "title", "intro", "text", "attribution", "grade", "source")},
                "topic": topic or (h.get("topics") or [""])[0], "template": info["look"],
-               "footage": info["footage"], "ambience": info["ambience"],
+               "footage": info["footage"], "ambience": info["ambience"], "narration": info["narration"],
                "platforms": captions(cfg, rng, h), "published": {}, "approved": False}
         rp = OUT / f"{vid}.json"
         write_json(rp, rec)

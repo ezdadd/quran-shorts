@@ -399,8 +399,13 @@ def main(argv=None):
     except AgentError as e:             # the agent could not finish: the clip just waits for you
         log.error("agent: %s", e)
         if chat:
-            telegram.api("sendMessage", chat_id=chat, text=f"🤖 المصحح مقدرش يراجع {req.get('autofix')}: {e}\n"
-                                                           "المقطع مستني موافقتك زي الأول.")
+            import json
+            vid = req.get("autofix")
+            telegram.api("sendMessage", chat_id=chat,
+                         text=f"🤖 المصحح مقدرش يراجع 🆔 {vid}: {e}\nالمقطع مستني موافقتك زي الأول، "
+                              "أو دوس «أعد التصحيح» يجرب تاني دلوقتي.",
+                         reply_markup=json.dumps({"inline_keyboard": [[{"text": "🔁 أعد التصحيح",
+                                                                        "callback_data": f"f:{vid}"}]]}))
         raise SystemExit(1)
     except ClipError as e:
         log.error("%s", e)
