@@ -96,29 +96,31 @@ def latest(source: dict, n: int = 12) -> list[dict]:
     return out
 
 
-def run(cfg) -> list[dict]:
-    """Clip requests for today's new videos (and remembers what was taken)."""
+def run(cfg, rng=None) -> list[dict]:
+    """Clip requests for today: from each account a RANDOM video of its last sources.pool videos that
+    we haven't taken yet (or the newest, with sources.pick: newest). Remembers what was taken."""
+    import random
+    rng = rng or random.Random()
     sc = cfg.get("sources") or {}
     sources = read_json(LIST, {})
     seen = read_json(SEEN, {})
     left = int(sc.get("max_per_day", 3))
     lo, hi = int(sc.get("min_seconds", 15)), int(sc.get("max_seconds", 300))
     reqs, problems = [], []
-    for key, s in sources.items():
+    order = list(sources.items())
+    rng.shuffle(order)                      # with more accounts than the daily cap, rotate fairly
+    for key, s in order:
         if left <= 0:
             break
         try:
-            vids = latest(s)
+            vids = latest(s, int(sc.get("pool", 40)))
         except Exception as e:
             problems.append(f"{s.get('name') or key}: {str(e)[:120]}")
             continue
         taken = seen.setdefault(key, {})
-        first_sync = not taken
         fresh = [v for v in vids if v["id"] not in taken]
-        if first_sync:                      # only the newest one now; the older ones count as seen
-            for v in fresh[1:]:
-                taken[v["id"]] = "old"
-            fresh = fresh[:1]
+        if (s.get("pick") or sc.get("pick", "random")) == "random":
+            rng.shuffle(fresh)
         picked = 0
         for v in fresh:
             if picked >= int(s.get("per_day", sc.get("per_source", 1))) or left <= 0:
