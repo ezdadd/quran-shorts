@@ -50,7 +50,7 @@ def sound_name(text: str) -> str | None:
     (time range, الشيخ, عنوان:, N مقاطع) and must contain letters."""
     m = re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$", text or "")
     if m:
-        return m.group(1).strip()[:40]
+        return URL_RE.sub(" ", m.group(1)).strip(" -–—:،,")[:40] or None
     rest = URL_RE.sub(" ", text or "").strip()
     if not rest or not re.search(r"[^\W\d_]", rest):
         return None                         # the link alone -> a clip, as before
