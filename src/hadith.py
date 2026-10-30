@@ -171,15 +171,18 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
 
 
 def captions(cfg, rng: random.Random, h: dict) -> dict:
+    """The Prophet's ﷺ words first (what people search for), then collector + grade."""
     src_line = " · ".join(x for x in (h.get("attribution"), h.get("grade")) if x)
+    words = split_intro(h)[1]
     out = {}
     for p in ("youtube", "tiktok", "instagram", "facebook"):
         tags = rng.sample(TAGS, 4)
         if p == "youtube":
             tags.append("#shorts")
-        body = f"{h.get('title') or 'حديث شريف'}\n{src_line}\n\n{' '.join(tags)}"
+        body = f"قال رسول الله ﷺ:\n{words}\n{src_line}\n\n{' '.join(tags)}"
         out[p] = {"caption": body, "hashtags": tags}
-    out["youtube"]["title"] = f"حديث شريف | {h.get('title') or ''}"[:100]
+    short = words.strip("«»").split()
+    out["youtube"]["title"] = ("حديث شريف | " + " ".join(short[:12]) + ("…" if len(short) > 12 else ""))[:100]
     return out
 
 
