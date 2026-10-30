@@ -139,7 +139,7 @@ async function menu(env, data) {
   const sheikhRows = (prefix, back) => [[["🎲 أي شيخ", `${prefix}:-`]],
     ...pairs(m.reciters.map(([, label], i) => [label, `${prefix}:${i}`])), [["⬅️ رجوع", back]]];
   if (data === "g:t")
-    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث شريف", "g:h"]], [["🧒 قصة للأطفال (حديث)", "g:k"]],
+    return ["⚙️ عايز تعمل إيه؟", kb([[["📖 آيات قرآن", "g:q"]], [["📜 حديث شريف", "g:h"]], ...(m.kids ? [[["🧒 قصة للأطفال (حديث)", "g:k"]]] : []),
                                      [["🎙 مقطع من لينك", "g:l"]],
                                      [["📊 الطابور (/que)", "g:que"]]])];
   if (data === "g:q")

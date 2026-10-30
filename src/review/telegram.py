@@ -86,9 +86,9 @@ def generate_menu(cfg, data: str) -> tuple[str, str | None]:
     p = data.split(":")
     if data == "g:t":
         return ("⚙️ عايز تعمل إيه؟", _gen_kb([[("📖 آيات قرآن", "g:q")],
-                                            [("📜 حديث شريف", "g:h")],
-                                            [("🧒 قصة للأطفال (حديث)", "g:k")],
-                                            [("🎙 مقطع من لينك", "g:l")],
+                                            [("📜 حديث شريف", "g:h")]] +
+                                           ([[("🧒 قصة للأطفال (حديث)", "g:k")]] if _kids_on(cfg) else []) +
+                                           [[("🎙 مقطع من لينك", "g:l")],
                                             [("📊 الطابور (/que)", "g:que")]]))
     if data == "g:q":
         th = _themes(cfg)
@@ -407,12 +407,16 @@ def fetch_updates(state: dict) -> tuple[list[dict], bool]:
         return [], False
 
 
+def _kids_on(cfg) -> bool:
+    return bool((cfg.get("kids") or {}).get("enabled", True))
+
+
 def write_menu_data(cfg) -> None:
     """data/bot_menu.json — the themes and sheikhs the Worker shows in the /generate menu
     (same order as here, so the button numbers mean the same thing on both sides)."""
     path = ROOT / "data" / "bot_menu.json"
     data = {"themes": _themes(cfg), "reciters": [list(x) for x in _reciters(cfg)],
-            "hadith_topics": _hadith_topics()}
+            "hadith_topics": _hadith_topics(), "kids": _kids_on(cfg)}
     if read_json(path, None) != data:
         write_json(path, data)
 
