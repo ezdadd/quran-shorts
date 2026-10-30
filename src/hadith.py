@@ -135,6 +135,7 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
     font = templates._pick(rng, {k: v["weight"] for k, v in tf.items()})
     tpl.font, tpl.position, tpl.animation, tpl.show_title = font, "center", "whole", False
     tpl.label_font = "Amiri-Regular.ttf"         # intro / source lines must be easy to read
+    tpl.color = templates._pick(rng, cfg["templates"].get("text_colors") or {"white": 1})
     category = footage.pick_category(cfg, rng)
     clips = footage.get_clips(cfg, category, total, history, rng)
     bg = build_background(cfg, clips, total, tpl, work / "bg.mp4")
@@ -182,7 +183,8 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
         lab = work / "_labels.png"
         tr.labels([x for x in labels if x["text"]]).save(lab)
 
-    amb = ambience.pick(cfg, category, rng)
+    from . import sounds                     # one of our library sounds under the narration, else nature
+    amb = (sounds.pick(cfg, "hadith", rng, work) if voice else None) or ambience.pick(cfg, category, rng)
     out = OUT / f"{vid}.mp4"
     OUT.mkdir(parents=True, exist_ok=True)
     args = ["-i", str(bg), "-f", "concat", "-safe", "0", "-i", str(concat), "-loop", "1", "-t", f"{total:.3f}",
@@ -194,7 +196,9 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
     bed = (f"[3:a]atrim=0:{total:.3f},asetpts=N/SR/TB,aresample=48000,aformat=channel_layouts=stereo,"
            f"loudnorm=I=-20:TP=-2,afade=t=in:d=1.5,afade=t=out:st={total - 2:.3f}:d=2")
     fc = [f"[1:v]fps={FPS},format=rgba[txt]", "[2:v]format=rgba,fade=t=in:st=0.2:d=0.6:alpha=1[lab]",
-          "[0:v][txt]overlay=0:0:format=auto[v1]",
+          # bright footage: darken the whole picture a little (there is no card behind the words)
+          ("[0:v]colorchannelmixer=rr=.72:gg=.72:bb=.72[bg0];[bg0]" if style == "dim" else "[0:v]")
+          + "[txt]overlay=0:0:format=auto[v1]",
           f"[v1][lab]overlay=0:0:format=auto,fade=t=in:st=0:d=0.5,fade=t=out:st={total - 0.7:.3f}:d=0.7,"
           f"format=yuv420p[vout]"]
     if voice:                               # the narration on top, nature sounds low underneath

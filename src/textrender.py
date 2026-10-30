@@ -37,15 +37,17 @@ html,body{margin:0;padding:0;background:transparent;width:1080px;height:1920px;o
 /* dark outline painted under the fill: letters stay crisp on any footage */
 .w,.m{paint-order:stroke fill;-webkit-text-stroke:.05em rgba(0,0,0,.55)}
 .card.band .w,.card.band .m,.card.frame .w,.card.frame .m,.card.ribbon .w,.card.ribbon .m{text-shadow:0 3px 8px rgba(0,0,0,.6)}
-.card.shadow .w,.card.shadow .m{text-shadow:0 2px 4px rgba(0,0,0,.95),0 0 26px rgba(0,0,0,.75)}
-.card.soft .w,.card.soft .m{text-shadow:0 2px 6px rgba(0,0,0,.8),0 0 18px rgba(0,0,0,.5)}
+/* no card: a thick dark outline + layered shadows keep the words readable on any footage */
+.card.shadow .w,.card.shadow .m,.card.soft .w,.card.soft .m{-webkit-text-stroke:.09em rgba(0,0,0,.9);
+      text-shadow:0 3px 3px rgba(0,0,0,.95),0 0 12px rgba(0,0,0,.85),0 0 34px rgba(0,0,0,.7)}
 .w.todo{opacity:.72}
 .w.cur{color:var(--accent);text-shadow:0 0 22px rgba(242,210,122,.55),0 2px 5px rgba(0,0,0,.85)}
 .w.hide,.m.hide{visibility:hidden}
 .m,.g{white-space:nowrap}
 .br{font-family:"B";color:var(--accent)}
 .lbl{position:absolute;left:70px;right:70px;text-align:center;direction:rtl;font-family:"L";
-     color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.85)}
+     color:#fff;paint-order:stroke fill;-webkit-text-stroke:.08em rgba(0,0,0,.85);
+     text-shadow:0 2px 3px rgba(0,0,0,.95),0 0 14px rgba(0,0,0,.8)}
 .pill{display:inline-block;padding:.18em .9em .28em;border-radius:999px;background:rgba(0,0,0,.38);
       font-weight:700;letter-spacing:.02em;text-shadow:0 1px 3px rgba(0,0,0,.7)}
 </style></head><body><div id="stage"></div>

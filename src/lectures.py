@@ -363,12 +363,20 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
     concat = write_concat(frames, total, work, tpl.entrance)
     tr.use_fonts((sub or {}).get("file", SUB_FONT), label_font=tpl.label_font)
     b = cfg.get("branding", {})
-    labels = [{"text": rec["title"], "y": 120, "size": 50}] if rec.get("title") else []
+    photo = ROOT / rec["sheikh_photo"] if rec.get("sheikh_photo") else None
+    photo = photo if photo and photo.exists() else None
+    title_y = 470 if photo else 120          # the framed photo takes the top of the screen
+    labels = [{"text": rec["title"], "y": title_y, "size": 50}] if rec.get("title") else []
     labels += [{"text": rec["sheikh_name"], "y": b.get("y", 1735) - 75, "size": 42},
                {"text": b.get("handle", ""), "y": b.get("y", 1735), "size": b.get("size", 32), "pill": True}]
     labels = [x for x in labels if x["text"]]
     lab_png = work / "_labels.png"
-    tr.labels(labels).save(lab_png)
+    lab = tr.labels(labels)
+    if photo:                                # sheikh's photo in the circular Islamic frame
+        from .badge import badge
+        bd = badge(photo, 300)
+        lab.alpha_composite(bd, ((W - bd.width) // 2, 110))
+    lab.save(lab_png)
 
     inputs = args + ["-f", "concat", "-safe", "0", "-i", str(concat),
                      "-loop", "1", "-t", f"{total:.3f}", "-i", str(lab_png)]

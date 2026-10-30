@@ -29,7 +29,7 @@ log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
-COMMANDS_VERSION = 3
+COMMANDS_VERSION = 4
 GENERATE: list[dict] = []   # /generate requests in this poll -> one daily.yml run with the job list
 GENERATE_MAX = 10           # videos per poll
 GEN_COUNTS = (1, 3, 5, 10)
@@ -267,6 +267,8 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
    ويوافق لوحده — إلا لو فيه آية أو حديث مش واضح أو مش واثق، ساعتها بيستناك. الآيات والأحاديث مش بيلمسها.
    ↩️ أو ❌ بعدها بيلغوا موافقته.
 /generate 5  اعمل 5 فيديوهات قرآن جديدة جاهزة للطابور (من 1 لـ 10)
+🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (من غير موسيقى) — /sounds تشوفها
+🖼 رد على مقطع لينك بصورة الشيخ (واكتب اسمه) = تتحط في إطار إسلامي دائري
 /que عدد الفيديوهات في كل حالة (متوافق ومستني النشر، اتنشر، مرفوض، مستني موافقتك، تحت التجهيز، اللي شاركته)
 /status حالة الفيديوهات"""
 
@@ -780,6 +782,21 @@ def poll(cfg) -> bool:
                 except TelegramError:
                     pass
                 continue
+            if action == "s":                   # sounds library: s:play:<i> / s:del:<i>
+                op, _, i = vid.partition(":")
+                names = sorted(read_json(ROOT / "data" / "sounds.json", {}))
+                name = names[int(i)] if i.isdigit() and int(i) < len(names) else None
+                lib = read_json(ROOT / "data" / "sounds.json", {})
+                if name and op == "play":
+                    api("sendAudio", chat_id=me, audio=lib[name]["url"], title=name, performer="ازْدَدْ")
+                elif name and op == "del":
+                    clip_requests.append({"id": f"sdel-{u['update_id']}", "sound_del": name})
+                    api("sendMessage", chat_id=me, text=f"🗑 هيتمسح الصوت «{name}» خلال دقيقة.")
+                try:
+                    api("answerCallbackQuery", callback_query_id=cq["id"])
+                except TelegramError:
+                    pass
+                continue
             if action == "f":                   # 🤖 correct now (you approve afterwards)
                 state.setdefault("agent_started", {})[vid] = {
                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "tries": 2}
@@ -839,6 +856,30 @@ def poll(cfg) -> bool:
                          "الأيام الجاية في أحسن المواعيد.")
             elif text.startswith("/que") or text.startswith("/queue"):
                 api("sendMessage", chat_id=me, text=queue_text(cfg, reviews, state))
+            elif text.startswith("/sounds"):
+                import json
+                lib = read_json(ROOT / "data" / "sounds.json", {})
+                names = sorted(lib)
+                if not names:
+                    api("sendMessage", chat_id=me, text="🔊 مكتبة الأصوات فاضية.\nابعت لينك (فيسبوك / إنستجرام / يوتيوب / "
+                                                        "تيك توك) ومعاه سطر:  صوت: الاسم")
+                else:
+                    rows = [[{"text": f"▶️ {n} ({int(lib[n].get('duration', 0))} ث)", "callback_data": f"s:play:{i}"},
+                             {"text": "🗑", "callback_data": f"s:del:{i}"}] for i, n in enumerate(names)][:40]
+                    api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — بتتحط خلفية تحت الأحاديث المقروءة:",
+                        reply_markup=json.dumps({"inline_keyboard": rows}))
+            elif not reply and (m_snd := re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$",
+                                                    text or msg.get("caption") or "")) \
+                    and (URL_IN.search(text or msg.get("caption") or "") or _media(msg)):
+                media = _media(msg)             # a sound for the library, not a clip
+                req = {"id": f"snd-{msg['message_id']}", "sound": m_snd.group(1), "msg_id": msg["message_id"]}
+                if media:
+                    req["file_id"] = media["file_id"]
+                else:
+                    req["url"] = URL_IN.search(text or msg.get("caption") or "").group(0)
+                clip_requests.append(req)
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text=f"🔊 هحفظ الصوت «{m_snd.group(1)}» بعد ما أتأكد إن مفيهوش موسيقى — دقايق ويوصلك تأكيد.")
             elif text.startswith("/status") or text.startswith("/start"):
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
             elif not reply and (URL_IN.search(text) or _media(msg)):
@@ -864,6 +905,19 @@ def poll(cfg) -> bool:
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                     text=f"✅ استلمت{when}. هاخد الصوت بس وأركبه على فيديو من عندنا بترجمة، "
                          "وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
+            elif reply and msg.get("photo"):    # a sheikh's photo for a clip -> circular Islamic frame
+                m = ID_RE.search(reply.get("caption") or reply.get("text") or "")
+                vid = m.group(1) if m else ""
+                if not vid.startswith(("c-", "l-")):
+                    api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                        text="ابعت الصورة كرد على فيديو مقطع لينك أو درس (مش آيات أو حديث).")
+                    continue
+                clip_requests.append({"id": f"photo-{msg['message_id']}", "photo": vid,
+                                      "file_id": msg["photo"][-1]["file_id"], "name": msg.get("caption") or ""})
+                api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                    text="🖼 هحط الصورة في إطار إسلامي دائري فوق الفيديو، والنسخة الجديدة هتوصلك خلال دقايق."
+                         + ("\nواتحفظت باسم الشيخ، فهتتحط لوحدها في أي مقطع جاي ليه." if msg.get("caption") else
+                            "\n(لو كتبت اسم الشيخ مع الصورة، هتتحط لوحدها في مقاطعه الجاية.)"))
             elif reply and text and (reply.get("text") or "").startswith(ASK_PASSAGE):
                 try:                    # the surah / ayat you typed for /generate
                     res = parse_passage(cfg, text)
@@ -927,6 +981,7 @@ def poll(cfg) -> bool:
             api("setMyCommands", commands=json.dumps([
                 {"command": "que", "description": "عدد الفيديوهات في كل حالة"},
                 {"command": "generate", "description": "اعمل فيديوهات قرآن جديدة للطابور (مثلا /generate 5)"},
+                {"command": "sounds", "description": "مكتبة الأصوات (تسمع / تمسح)"},
                 {"command": "status", "description": "فيديوهات الأيام الجاية"},
                 {"command": "help", "description": "إزاي تستخدم البوت"}]))
             state["commands"] = COMMANDS_VERSION

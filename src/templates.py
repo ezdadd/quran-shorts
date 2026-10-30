@@ -58,7 +58,7 @@ def choose(cfg: dict, rng: random.Random, used_today: set[str], word_timing: boo
             position=_pick(rng, t["position"]),
             background=_pick(rng, t["background"]),
             animation=_pick(rng, anim_w),
-            color=rng.choice(list(t["colors"])),
+            color=_pick(rng, t.get("text_colors") or {c: 1 for c in t["colors"]}),
             show_title=rng.random() < t["show_title"],
             show_reciter=rng.random() < t["show_reciter"],
             **_look(t, rng),
@@ -73,8 +73,7 @@ def choose_clip(cfg: dict, rng: random.Random) -> Template:
     t = cfg["templates"]
     subs = t.get("sub_fonts") or {"noto_naskh": {"weight": 1}}
     return Template(font=_pick(rng, {k: v.get("weight", 1) for k, v in subs.items()}), position="lower",
-                    background=_pick(rng, {k: v for k, v in t["background"].items()
-                                           if k in ("band", "frame", "ribbon")}),
+                    background=_pick(rng, t["background"]),
                     animation="word", color="white", show_title=True, show_reciter=True, **_look(t, rng))
 
 
@@ -90,14 +89,13 @@ def readable_color(tpl: Template, luma: float) -> tuple[str, str]:
     (0..1, measured in the text zone). Bright footage forces a darker backing."""
     background = tpl.background
     color = tpl.color
+    if background in ("shadow", "dim"):
+        # no card behind the text: bright footage gets the whole picture darkened a little instead
+        background = "dim" if luma >= 0.35 else "shadow"
+        if luma >= 0.45 and color == "white":
+            color = "gold"                  # gold + dark outline holds better on bright skies / snow
+        return color, background
     if luma >= 0.35:
-        if background in ("shadow", "dim"):
-            background = "band"
         if luma >= 0.50 and color == "cream":
             color = "white"
-    elif luma >= 0.20 and background == "shadow":
-        background = "dim"
-    # word/line modes show part of the text dimmed — never on a bare shadow
-    if tpl.animation in ("word", "line") and background == "shadow":
-        background = "dim"
     return color, background

@@ -103,6 +103,23 @@ def _local(cfg, category: str) -> list[dict]:
             for p in sorted(d.glob("*.mp4"))] if d.is_dir() else []
 
 
+def _modest(cfg, clip_id: str, path: Path, category: str) -> bool:
+    """Gemini looks at frames of every new clip (src/footage_check.py). If the check can't run right
+    now, only the original nature categories (where the keyword filter is enough) are allowed."""
+    if not cfg["footage"].get("vision_check", True) or clip_id.startswith("local:"):
+        return True
+    from . import footage_check
+    try:
+        return footage_check.is_ok(cfg, clip_id, path, path.parent)
+    except footage_check.CheckUnavailable as e:
+        safe = category in (cfg["footage"].get("no_check_needed") or [])
+        log.warning("footage check unavailable (%s) — %s %s", e, "using" if safe else "skipping", clip_id)
+        return safe
+    except Exception as e:                  # broken file etc.
+        log.warning("footage check error for %s: %s — skipping", clip_id, e)
+        return False
+
+
 # ---------------------------------------------------------------- selection
 def pick_category(cfg, rng: random.Random, avoid: set[str] = frozenset()) -> str:
     w = {k: v for k, v in cfg["footage"]["category_weights"].items() if k not in avoid}
@@ -172,6 +189,8 @@ def get_clips(cfg, category: str, need_seconds: float, history: dict, rng: rando
         except Exception:
             continue
         if dur < 4:
+            continue
+        if not _modest(cfg, c["id"], p, category):
             continue
         clips.append(Clip(c["id"], category, p, dur, c.get("w", 0), c.get("h", 0),
                           c["credit"], c["page"]))

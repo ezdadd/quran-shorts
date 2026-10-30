@@ -186,6 +186,7 @@ def make_clips(cfg, req: dict) -> list[Path]:
             rec = {
                 "id": cid, "type": "lecture", "kind": "clip", "approved": False, "date": today.isoformat(),
                 "sheikh_id": "clip", "sheikh_name": req.get("sheikh") or "",
+                "sheikh_photo": _library_photo(req.get("sheikh")),   # sent before for this sheikh
                 "title": title,
                 "series": {"id": sid, "part": k + 1, "of": len(windows), "truncated": truncated} if series else None,
                 "source": {"file": str(audio.relative_to(ROOT)).replace("\\", "/"),
@@ -262,6 +263,32 @@ def _queued(vid: str) -> dict:
     if r.get("published"):
         raise ClipError("المقطع ده اتجدول/اتنشر خلاص — التعديل مش هيوصل للمنصات")
     return r
+
+
+def _library_photo(name: str | None) -> str | None:
+    from . import badge
+    p = badge.find(name or "")
+    return str(p.relative_to(ROOT)).replace("\\", "/") if p else None
+
+
+def add_photo(cfg, req: dict) -> tuple[Path, dict]:
+    """Your photo of the sheikh (sent as a reply in Telegram): save it in the library under his name,
+    and rebuild the clip with it in the circular Islamic frame."""
+    from . import badge
+    from .review import telegram
+    import requests as rq
+    vid = req["photo"]
+    r = _queued(vid)
+    f = telegram.api("getFile", file_id=req["file_id"])
+    data = rq.get(f"https://api.telegram.org/file/bot{telegram._token()}/{f['file_path']}", timeout=60).content
+    name = re.sub(r"\s+", " ", req.get("name") or "").strip()
+    p = badge.save(name, data, vid)
+    r["sheikh_photo"] = str(p.relative_to(ROOT)).replace("\\", "/")
+    if name and not r.get("sheikh_name"):
+        r["sheikh_name"] = name if name.startswith("الشيخ") else f"الشيخ {name}"
+    q, old_tg = _rerender(cfg, r, vid, _clip_audio(cfg, r, vid), stamp="photo_at")
+    log.info("[%s] sheikh photo added (%s)", vid, p.name)
+    return q, old_tg
 
 
 def rerender_edit(cfg, req: dict) -> tuple[Path, dict]:
@@ -379,13 +406,32 @@ def main(argv=None):
             telegram.api("sendMessage", chat_id=chat, text=_agent_report(vid, res),
                          **({"reply_to_message_id": tg["message_id"]} if tg.get("message_id") else {}))
             return
-        if req.get("edit"):
-            q, old_tg = rerender_edit(cfg, req)
+        if req.get("sound") or req.get("sound_del"):     # the sounds library
+            from . import sounds
+            if req.get("sound_del"):
+                done = sounds.remove(req["sound_del"])
+                if chat:
+                    telegram.api("sendMessage", chat_id=chat, text=f"🗑 الصوت «{req['sound_del']}» "
+                                 + ("اتمسح." if done else "مش موجود."))
+                return
+            try:
+                s = sounds.add(cfg, req["sound"], req)
+                msg = (f"🔊 اتحفظ الصوت «{req['sound']}» ({int(s['duration'])} ث) — مفيهوش موسيقى ✓\n"
+                       "هيتحط خلفية تحت الأحاديث المقروءة. /sounds تشوف المكتبة.")
+            except sounds.SoundError as e:
+                msg = f"🔊 الصوت «{req['sound']}» متحفظش: {e}"
+            if chat:
+                telegram.api("sendMessage", chat_id=chat, text=msg,
+                             **({"reply_to_message_id": req["msg_id"]} if req.get("msg_id") else {}))
+            return
+        if req.get("edit") or req.get("photo"):
+            q, old_tg = rerender_edit(cfg, req) if req.get("edit") else add_photo(cfg, req)
             if chat:
                 if old_tg.get("message_id"):
                     try:
                         telegram.api("editMessageCaption", chat_id=chat, message_id=old_tg["message_id"],
-                                     caption="✏️ النسخة دي اتعدلت — شوف الجديدة تحت")
+                                     caption="✏️ النسخة دي اتعدلت — شوف الجديدة تحت" if req.get("edit")
+                                     else "🖼 اتحطت صورة الشيخ — شوف النسخة الجديدة تحت")
                     except telegram.TelegramError:
                         pass
                 telegram.send_one(cfg, q)

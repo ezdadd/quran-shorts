@@ -122,12 +122,25 @@ footage:
     rain:      ["rain drops", "rain on leaves", "rainy window", "rain forest"]
     forest:    ["forest", "green forest aerial", "sunlight trees", "misty forest"]
     mountain:  ["mountains", "mountain clouds", "mountain lake", "snowy peaks"]
-    sky:       ["clouds timelapse", "sunset sky", "sky clouds", "starry night sky"]
+    sky:       ["clouds timelapse", "sunset sky", "sky clouds", "starry night sky", "above the clouds",
+                "clouds aerial", "sky timelapse"]
     desert:    ["desert dunes", "sand dunes aerial", "desert sunset"]
     waterfall: ["waterfall", "waterfall slow motion", "jungle waterfall"]
     river:     ["river", "mountain stream", "flowing water"]
     snow:      ["snowfall", "snowy forest", "winter landscape"]
     storm:     ["lightning storm", "storm clouds", "thunderstorm"]
+    # جديد — مشاهد بتشد (تايم لابس / درون / سلو موشن / جرافيكس). كل مقطع جديد بيتفحص بالـ AI قبل استخدامه
+    space:     ["galaxy", "nebula space", "planet earth from space", "milky way timelapse", "universe stars"]
+    home:      ["cozy fireplace", "rain on window night", "candle light dark", "lantern night", "cozy cabin snow"]
+    farm:      ["wheat field", "green fields aerial", "farm aerial", "sheep grazing", "horses running field"]
+    animals:   ["lion", "eagle flying", "deer forest", "birds flying flock", "dolphins", "whale underwater"]
+    flowers:   ["blooming flower timelapse", "rose petals", "cherry blossom", "flower field", "tulips"]
+    graphics:  ["golden particles", "light rays", "abstract light background", "islamic pattern animation",
+                "3d flowers animation"]
+    islamic:   ["mosque dome", "islamic architecture", "minaret sunset", "mosque aerial"]
+    underwater: ["underwater coral", "jellyfish", "underwater light rays", "tropical fish"]
+    roads:     ["highway aerial", "driving pov road", "mountain road drive", "scenic road aerial", "winding road aerial",
+                "road trip landscape", "tunnel driving", "highway timelapse night"]
   category_weights:
     ocean: 3
     rain: 2
@@ -139,6 +152,19 @@ footage:
     river: 2
     snow: 1
     storm: 1
+    space: 3
+    home: 2
+    farm: 2
+    animals: 2
+    flowers: 2
+    graphics: 2
+    islamic: 2
+    underwater: 1
+    roads: 3
+  # كل مقطع جديد بيتعرض على Gemini (صور منه) ويترفض لو فيه ست أو أي إنسان أو عري أو صليب/أصنام أو خمر
+  # أو موسيقى أو خنزير أو لوجو. لو الفحص مش متاح ساعتها، بيتستخدم بس الأقسام دي (طبيعة بحتة):
+  vision_check: true
+  no_check_needed: [ocean, rain, forest, mountain, sky, desert, waterfall, river, snow, storm]
   # كلمات في رابط المقطع تخليه يتستبعد (ناس / وشوش)
   blocked_words: [man, woman, men, women, person, people, girl, boy, child, kid, couple,
                   surfer, surfing, swimmer, hiker, tourist, face, portrait, model, family,
@@ -164,6 +190,15 @@ ambience:
     river:     [river]
     snow:      [wind]
     storm:     [storm, rain]
+    space:     []
+    home:      [rain]
+    farm:      [birds, forest]
+    animals:   [birds, forest]
+    flowers:   [birds]
+    graphics:  []
+    islamic:   [wind]
+    underwater: [ocean]
+    roads:     [wind]
 
 # ------------------------------------------------------------
 # القوالب العشوائية (الأوزان قابلة للتعديل)
@@ -192,8 +227,9 @@ templates:
   max_lines: {center: 4, lower: 3}
   # center = نص الشاشة (أوضح مكان، بعيد عن أزرار المنصات والكابشن تحت)
   position:   {center: 5, lower: 1}
-  # شكل الكارت ورا النص: band = كارت غامق، frame = إطار دهبي رفيع، ribbon = شريط بعرض الشاشة
-  background: {band: 4, frame: 2, ribbon: 2, blur: 2, dim: 1, shadow: 1}
+  # النص على الفيديو على طول من غير كارت (اختيارك): حدود غامقة قوية + ظل، ولو المشهد فاتح جدًا
+  # الفيديو كله بيتعتّم شوية (dim) بدل ما يتحط مربع ورا الكلام
+  background: {shadow: 1, band: 0, frame: 0, ribbon: 0, blur: 0, dim: 0}
   animation:  {whole: 3, line: 2, word: 3}   # word بيشتغل بس لو توقيت الكلمات متاح
   entrance:   {fade: 3, rise: 2}             # rise = النص بيطلع لفوق بنعومة وهو بيظهر
   # تلوين سينمائي
@@ -211,6 +247,8 @@ templates:
     white: "#FFFFFF"
     gold:  "#F2D27A"
     cream: "#FFF4DC"
+  # لون الكلام: مميز وظاهر على أي خلفية (الدهبي أغلب الوقت)
+  text_colors: {gold: 3, white: 2}
 
 # ------------------------------------------------------------
 # الكابشن والهاشتاجات
@@ -334,3 +372,11 @@ hadith:
   voice: Charon            # صوت رجالي عميق وهادي
   tts_models: [gemini-3.1-flash-tts-preview, gemini-2.5-flash-preview-tts]
   tts_min_match: 0.9
+
+# ------------------------------------------------------------
+# مكتبة الأصوات: ابعت لينك للبوت ومعاه «صوت: الاسم» — بيتحفظ (بعد فحص إن مفيهوش موسيقى/آلات)
+# ويتعرض في /sounds. بيتحط خلفية هادية تحت الأحاديث المقروءة بنسبة chance من الفيديوهات.
+# ------------------------------------------------------------
+sounds:
+  use_in: [hadith]
+  chance: 0.7
