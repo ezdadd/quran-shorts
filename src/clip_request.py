@@ -48,6 +48,8 @@ def sound_name(text: str) -> str | None:
     """A link (or a sent video) with a plain name next to it = save it as a sound, not a clip.
     "صوت: <name>" always counts; otherwise the leftover text must not hold any clip instruction
     (time range, الشيخ, عنوان:, N مقاطع) and must contain letters."""
+    if re.match(r"^\s*(?:مصدر|source)\s*[:：]", text or ""):
+        return None                         # "مصدر: <link>" adds a clip source, it is not a sound
     m = re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$", text or "")
     if m:
         return URL_RE.sub(" ", m.group(1)).strip(" -–—:،,")[:40] or None

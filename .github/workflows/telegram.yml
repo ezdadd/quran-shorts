@@ -59,7 +59,7 @@ jobs:
         run: |
           git config user.name "quran-shorts bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/reviews.json data/telegram_state.json data/bot_menu.json || true
+          git add data/reviews.json data/telegram_state.json data/bot_menu.json data/sources.json || true
           if ! git diff --cached --quiet; then
             git commit -m "review: $(TZ=Africa/Cairo date '+%F %H:%M')"
             for i in 1 2 3; do git pull --rebase --autostash && git push && break; sleep 10; done

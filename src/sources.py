@@ -47,14 +47,25 @@ def platform(url: str) -> str | None:
 def listing_url(url: str) -> str:
     """What yt-dlp should list for this source."""
     p = platform(url)
-    if p == "youtube":
-        m = re.search(r"youtube\.com/(@[\w.\-]+|channel/[\w\-]+|c/[\w\-]+)", url)
-        if not m:
-            raise SourceError("ابعت لينك القناة نفسها (youtube.com/@الاسم)، مش لينك فيديو")
-        return f"https://www.youtube.com/{m.group(1)}/shorts"
     if p == "tiktok":
         return url
-    raise SourceError("المصادر التلقائية: يوتيوب وتيك توك بس — فيسبوك وإنستجرام بيمنعوا قراءة الصفحة، ابعت لينكاتهم بإيدك.")
+    if p == "youtube":                      # listing works, but YouTube blocks downloads from GitHub
+        raise SourceError("يوتيوب بيمنع التحميل من سيرفرات GitHub، فمش هينفع كمصدر تلقائي — "
+                          "ابعت لينكات فيديوهاته بإيدك، أو ضيف حساب تيك توك للشيخ.")
+    raise SourceError("المصادر التلقائية: حسابات تيك توك بس — فيسبوك وإنستجرام بيمنعوا قراءة الصفحة، "
+                      "ابعت لينكاتهم بإيدك.")
+
+
+def add(url: str, sheikh: str = "") -> tuple[str, dict]:
+    """Add a TikTok account (profile link or any video of it). Returns (key, source)."""
+    listing_url(url)                        # raises SourceError for unsupported platforms
+    m = re.search(r"tiktok\.com/(@[\w.\-]+)", url)
+    key = m.group(1) if m else url
+    lst = read_json(LIST, {})
+    lst[key] = {"name": key, "list_url": f"https://www.tiktok.com/{key}" if m else url,
+                "sheikh": sheikh, "added": datetime.now(timezone.utc).isoformat(timespec="minutes")}
+    write_json(LIST, lst)
+    return key, lst[key]
 
 
 def _ydl(opts: dict):

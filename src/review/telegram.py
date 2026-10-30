@@ -30,7 +30,7 @@ log = logging.getLogger("quran-shorts.telegram")
 OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
-COMMANDS_VERSION = 5
+COMMANDS_VERSION = 6
 KIND_LABEL = {"speech": "🗣 كلام", "music": "🎵 موسيقى/أغنية", "nasheed": "🎤 نشيد", "nature": "🌿 طبيعة",
               "ambient": "🌫 خلفية هادية", "mixed": "🔀 مختلط", "unknown": "❔"}   # = sounds.KINDS
 GENERATE: list[dict] = []   # /generate requests in this poll -> one daily.yml run with the job list
@@ -272,6 +272,7 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
 /generate 5  اعمل 5 فيديوهات قرآن جديدة جاهزة للطابور (من 1 لـ 10)
 🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (أي صوت) — /sounds تسمع / 🎬 تعمل منه فيديو / تمسح
 🖼 رد على مقطع لينك بصورة الشيخ (واكتب اسمه) = تتحط في إطار إسلامي دائري
+🛰 «مصدر: لينك حساب تيك توك الشيخ فلان» = كل يوم أحدث فيديو منه بيتعمل مقطع لوحده — /sources تشوفها
 /que عدد الفيديوهات في كل حالة (متوافق ومستني النشر، اتنشر، مرفوض، مستني موافقتك، تحت التجهيز، اللي شاركته)
 /status حالة الفيديوهات"""
 
@@ -787,6 +788,19 @@ def poll(cfg) -> bool:
                 except TelegramError:
                     pass
                 continue
+            if action == "src":                 # clip sources: src:del:<i>
+                op, _, i = vid.partition(":")
+                lst = read_json(ROOT / "data" / "sources.json", {})
+                keys = sorted(lst)
+                if op == "del" and i.isdigit() and int(i) < len(keys):
+                    lst.pop(keys[int(i)])
+                    write_json(ROOT / "data" / "sources.json", lst)
+                    api("sendMessage", chat_id=me, text=f"🗑 اتشال المصدر {keys[int(i)]}.")
+                try:
+                    api("answerCallbackQuery", callback_query_id=cq["id"])
+                except TelegramError:
+                    pass
+                continue
             if action == "s":                   # sounds library: s:play:<i> / s:del:<i>
                 op, _, i = vid.partition(":")
                 names = sorted(read_json(ROOT / "data" / "sounds.json", {}))
@@ -869,6 +883,29 @@ def poll(cfg) -> bool:
                          "الأيام الجاية في أحسن المواعيد.")
             elif text.startswith("/que") or text.startswith("/queue"):
                 api("sendMessage", chat_id=me, text=queue_text(cfg, reviews, state))
+            elif text.startswith("/sources"):
+                import json
+                lst = read_json(ROOT / "data" / "sources.json", {})
+                keys = sorted(lst)
+                if not keys:
+                    api("sendMessage", chat_id=me, text="🛰 مفيش مصادر لسه.\nضيف حساب تيك توك:  مصدر: اللينك الشيخ فلان\n"
+                                                        "(كل يوم فيديوهاته الجديدة بتتعمل مقاطع لوحدها)")
+                else:
+                    rows = [[{"text": f"🗑 {k}" + (f" · {lst[k]['sheikh']}" if lst[k].get("sheikh") else ""),
+                              "callback_data": f"src:del:{i}"}] for i, k in enumerate(keys)][:40]
+                    api("sendMessage", chat_id=me, text=f"🛰 المصادر ({len(keys)}) — دوس على أي واحد لشيله:",
+                        reply_markup=json.dumps({"inline_keyboard": rows}))
+            elif (m_src := re.match(r"^\s*(?:مصدر|source)\s*[:：]", text)) and URL_IN.search(text):
+                from ..clip_request import parse_request
+                from ..sources import SourceError, add as add_source
+                sh = parse_request(text).get("sheikh") or ""
+                try:
+                    key, _ = add_source(URL_IN.search(text).group(0).rstrip(").,،"), sh)
+                    api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
+                        text=f"🛰 اتضاف المصدر {key}" + (f" ({sh})" if sh else "") +
+                             ".\nكل يوم أحدث فيديو جديد منه بيتعمل مقطع ويوصلك للمراجعة. /sources تشوف المصادر.")
+                except SourceError as e:
+                    api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"], text=f"🛰 {e}")
             elif text.startswith("/report"):    # latest collected numbers (collected daily)
                 from ..stats import report
                 m = re.search(r"\d+", text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")))
@@ -1001,6 +1038,7 @@ def poll(cfg) -> bool:
                 {"command": "generate", "description": "اعمل فيديوهات قرآن جديدة للطابور (مثلا /generate 5)"},
                 {"command": "sounds", "description": "مكتبة الأصوات (تسمع / تمسح)"},
                 {"command": "report", "description": "تقرير المشاهدات (مثلا /report 30)"},
+                {"command": "sources", "description": "حسابات تيك توك اللي بناخد منها مقاطع تلقائي"},
                 {"command": "status", "description": "فيديوهات الأيام الجاية"},
                 {"command": "help", "description": "إزاي تستخدم البوت"}]))
             state["commands"] = COMMANDS_VERSION
