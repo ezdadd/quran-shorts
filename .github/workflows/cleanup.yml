@@ -18,7 +18,7 @@ concurrency:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       PYTHONIOENCODING: utf-8
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
@@ -35,6 +35,30 @@ jobs:
         env:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
         run: bash tools/state.sh pull
+
+      - name: Training data repo (only its index; the audio stays up there)
+        env:
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: bash tools/dataset.sh pull || echo "dataset repo unavailable - skipping collection"
+
+      # FFmpeg (cached static build): the audio of each published clip is kept as training data
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-btbn-n8.1-gpl
+
+      - name: FFmpeg
+        run: |
+          if [ ! -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            mkdir -p "$HOME/ffmpeg"
+            curl -sfL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz               | tar -xJ -C "$HOME/ffmpeg" --strip-components=1 || rm -rf "$HOME/ffmpeg/bin"
+          fi
+          if [ -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            echo "$HOME/ffmpeg/bin" >> "$GITHUB_PATH"
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -59,3 +83,4 @@ jobs:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
         run: |
           bash tools/state.sh save "cleanup: $(TZ=Africa/Cairo date '+%F %H:%M')"
+          bash tools/dataset.sh save

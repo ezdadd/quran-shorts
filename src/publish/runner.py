@@ -352,6 +352,11 @@ def cleanup(cfg) -> None:
                        for i in buf)
             last_due = max((datetime.fromisoformat(i["due"]) for i in pub.values() if i.get("due")), default=None)
             if done and last_due and last_due + timedelta(hours=hours) < now:
+                try:                        # its audio + final subtitles: training data, kept first
+                    from .. import dataset
+                    dataset.collect(cfg, r, reviews)
+                except Exception as e:
+                    log.warning("dataset %s: %s", r["id"], e)
                 try:
                     h["deleted"] = hosting.delete(h["public_id"])
                     changed = True

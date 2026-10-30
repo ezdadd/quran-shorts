@@ -229,6 +229,20 @@ def test_kids_story_rules(monkeypatch):
     assert "no " not in kids.STYLE.lower()          # Flux draws whatever it is told not to
 
 
+def test_dataset_labels_and_final_text():
+    """Training data: your corrections win over the raw transcript; untouched clips aren't kept."""
+    from src import dataset
+    r = {"id": "c-1", "segments": [
+        {"type": "speech", "start": 0.0, "end": 2.0, "text": "النص المصحح", "words": [{"w": "النص"}, {"w": "الغلط"}]},
+        {"type": "quran", "start": 2.0, "end": 4.0, "words": ["قُلْ", "هُوَ", "اللَّهُ", "أَحَدٌ"]},
+        {"type": "speech", "start": 4.0, "end": 4.0, "words": [{"w": "فاضي"}]}]}
+    ls = dataset.lines(r)
+    assert [x["text"] for x in ls] == ["النص المصحح", "قُلْ هُوَ اللَّهُ أَحَدٌ"]
+    assert dataset.label(r, {}) is None
+    assert dataset.label(r | {"edited_at": "x"}, {}) == "human"
+    assert dataset.label(r | {"auto": {"status": "approved"}}, {}) == "agent"
+
+
 def test_screen_scene_choice_matches_the_clip(monkeypatch):
     from src import screens
     lib = {"p1": {"portrait": True, "kind": "phone"}, "p2": {"portrait": True, "kind": "phone"},
