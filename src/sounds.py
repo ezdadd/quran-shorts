@@ -1,8 +1,11 @@
-"""Our sounds library: audio you share from Facebook / Instagram / YouTube / TikTok in Telegram with a
-caption "صوت: <name>". Saved on Cloudinary (quran-shorts/sounds/), listed in data/sounds.json,
-and used as the quiet background under narrated hadiths (config sounds.use_in).
+"""Our sounds library: any audio you share from Facebook / Instagram / YouTube / TikTok in Telegram
+with a caption "صوت: <name>" — someone talking, a song, a nasheed, nature, anything. Saved on
+Cloudinary (quran-shorts/sounds/), listed in data/sounds.json, shown with /sounds.
 
-Before a sound is kept, Gemini listens to it: anything with musical instruments / music is refused.
+Nothing is refused: Gemini listens once and labels the sound (speech / music / nasheed / nature /
+mixed) so the list stays organised. Only calm background sounds (nature, ambient) are ever placed
+automatically under a narrated hadith — a voice or a song there would clash with the narration —
+and nothing is ever mixed under Quran recitation.
 """
 from __future__ import annotations
 
@@ -21,6 +24,9 @@ from .util import ROOT, cache_dir, media_duration, read_json, run_ffmpeg, write_
 log = logging.getLogger("quran-shorts.sounds")
 PATH = ROOT / "data" / "sounds.json"
 MAX_SECONDS = 180
+KINDS = {"speech": "🗣 كلام", "music": "🎵 موسيقى/أغنية", "nasheed": "🎤 نشيد", "nature": "🌿 طبيعة",
+         "ambient": "🌫 خلفية هادية", "mixed": "🔀 مختلط", "unknown": "❔"}
+BED_KINDS = ("nature", "ambient")          # the only kinds put under a narrated hadith
 
 
 class SoundError(Exception):
@@ -31,17 +37,17 @@ def load() -> dict:
     return read_json(PATH, {})
 
 
-def _music_check(mp3: Path) -> tuple[bool, str]:
-    """(ok, reason) — Gemini listens to the first minute."""
+def classify(mp3: Path) -> tuple[str, str]:
+    """(kind, short description) — Gemini listens to the first minute. Never refuses anything."""
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
-        return True, "not checked (no key)"
-    prompt = ('Listen to this audio. Answer JSON only: {"music": true|false, "reason": "<short English>"}. '
-              'music=true if there is ANY musical instrument, beat, drum, synth or background music. '
-              'Voice only (speech, Quran, nasheed sung without instruments), nature sounds, rain, wind, birds '
-              'and silence are music=false.')
+        return "unknown", ""
+    prompt = ('Listen to this audio and answer JSON only: {"kind": "speech|music|nasheed|nature|ambient|mixed", '
+              '"summary": "<max 8 words, Arabic>"}. speech = mainly someone talking; music = song or instruments; '
+              'nasheed = singing without instruments; nature = rain, wind, sea, birds...; ambient = calm '
+              'background tone without words; mixed = talking over music.')
     data = base64.b64encode(mp3.read_bytes()).decode()
-    for model in ("gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest"):
+    for model in ("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash"):
         try:
             r = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                               headers={"x-goog-api-key": key}, timeout=120,
@@ -51,10 +57,11 @@ def _music_check(mp3: Path) -> tuple[bool, str]:
             if not r.ok:
                 continue
             v = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
-            return not v.get("music"), str(v.get("reason", ""))[:120]
+            kind = v.get("kind") if v.get("kind") in KINDS else "unknown"
+            return kind, str(v.get("summary", ""))[:80]
         except (requests.RequestException, KeyError, ValueError) as e:
-            log.warning("music check %s: %s", model, e)
-    return True, "not checked (models busy)"
+            log.warning("sound label %s: %s", model, e)
+    return "unknown", ""
 
 
 def add(cfg, name: str, req: dict) -> dict:
@@ -74,17 +81,15 @@ def add(cfg, name: str, req: dict) -> dict:
                 "-af", "loudnorm=I=-18:TP=-2", "-b:a", "160k", str(mp3)], "sound encode")
     probe = work / "probe.mp3"
     run_ffmpeg(["-i", str(mp3), "-t", "60", "-ac", "1", "-b:a", "64k", str(probe)], "sound probe")
-    ok, reason = _music_check(probe)
-    if not ok:
-        raise SoundError(f"الصوت ده فيه موسيقى/آلات ({reason}) — مش هيتحفظ.")
+    kind, summary = classify(probe)
     slug = "sound-" + (re.sub(r"\W+", "-", name, flags=re.U).strip("-") or "x")
     h = hosting.upload(mp3, f"sounds/{slug}")
     lib = load()
     lib[name] = {"url": h["url"], "public_id": h.get("public_id"), "duration": round(dur, 1),
-                 "source": info.get("webpage_url") or req.get("url"), "check": reason,
+                 "kind": kind, "summary": summary, "source": info.get("webpage_url") or req.get("url"),
                  "added": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     write_json(PATH, lib)
-    log.info("sound %r saved (%.0fs)", name, dur)
+    log.info("sound %r saved (%.0fs, %s)", name, dur, kind)
     return lib[name]
 
 
@@ -104,10 +109,10 @@ def remove(name: str) -> bool:
 
 
 def pick(cfg, use: str, rng, work: Path) -> Path | None:
-    """A random library sound for `use` ("hadith"), downloaded to work/, or None."""
+    """A random calm library sound (nature / ambient only) for `use` ("hadith"), or None."""
     if use not in ((cfg.get("sounds") or {}).get("use_in") or []):
         return None
-    lib = load()
+    lib = {k: v for k, v in load().items() if v.get("kind") in BED_KINDS}
     if not lib or rng.random() > float((cfg.get("sounds") or {}).get("chance", 0.7)):
         return None
     name = rng.choice(sorted(lib))

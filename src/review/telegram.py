@@ -30,6 +30,8 @@ OUTPUT = ROOT / "output"
 STATE = ROOT / "data" / "telegram_state.json"
 URL_IN = re.compile(r"https?://\S+")
 COMMANDS_VERSION = 4
+KIND_LABEL = {"speech": "🗣 كلام", "music": "🎵 موسيقى/أغنية", "nasheed": "🎤 نشيد", "nature": "🌿 طبيعة",
+              "ambient": "🌫 خلفية هادية", "mixed": "🔀 مختلط", "unknown": "❔"}   # = sounds.KINDS
 GENERATE: list[dict] = []   # /generate requests in this poll -> one daily.yml run with the job list
 GENERATE_MAX = 10           # videos per poll
 GEN_COUNTS = (1, 3, 5, 10)
@@ -267,7 +269,7 @@ HELP = """📎 مقطع من لينك: ابعت لينك (تيك توك / فيس
    ويوافق لوحده — إلا لو فيه آية أو حديث مش واضح أو مش واثق، ساعتها بيستناك. الآيات والأحاديث مش بيلمسها.
    ↩️ أو ❌ بعدها بيلغوا موافقته.
 /generate 5  اعمل 5 فيديوهات قرآن جديدة جاهزة للطابور (من 1 لـ 10)
-🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (من غير موسيقى) — /sounds تشوفها
+🔊 لينك ومعاه «صوت: الاسم» = يتحفظ في مكتبة الأصوات (أي صوت: كلام، أغنية، طبيعة...) — /sounds تشوفها
 🖼 رد على مقطع لينك بصورة الشيخ (واكتب اسمه) = تتحط في إطار إسلامي دائري
 /que عدد الفيديوهات في كل حالة (متوافق ومستني النشر، اتنشر، مرفوض، مستني موافقتك، تحت التجهيز، اللي شاركته)
 /status حالة الفيديوهات"""
@@ -864,9 +866,10 @@ def poll(cfg) -> bool:
                     api("sendMessage", chat_id=me, text="🔊 مكتبة الأصوات فاضية.\nابعت لينك (فيسبوك / إنستجرام / يوتيوب / "
                                                         "تيك توك) ومعاه سطر:  صوت: الاسم")
                 else:
-                    rows = [[{"text": f"▶️ {n} ({int(lib[n].get('duration', 0))} ث)", "callback_data": f"s:play:{i}"},
+                    rows = [[{"text": f"▶️ {n} · {KIND_LABEL.get(lib[n].get('kind', 'unknown'), '❔')} ({int(lib[n].get('duration', 0))} ث)",
+                              "callback_data": f"s:play:{i}"},
                              {"text": "🗑", "callback_data": f"s:del:{i}"}] for i, n in enumerate(names)][:40]
-                    api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — بتتحط خلفية تحت الأحاديث المقروءة:",
+                    api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — الأصوات الهادية (🌿 طبيعة / 🌫 خلفية) بس اللي بتتحط تحت الأحاديث المقروءة:",
                         reply_markup=json.dumps({"inline_keyboard": rows}))
             elif not reply and (m_snd := re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$",
                                                     text or msg.get("caption") or "")) \
@@ -879,7 +882,7 @@ def poll(cfg) -> bool:
                     req["url"] = URL_IN.search(text or msg.get("caption") or "").group(0)
                 clip_requests.append(req)
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
-                    text=f"🔊 هحفظ الصوت «{m_snd.group(1)}» بعد ما أتأكد إن مفيهوش موسيقى — دقايق ويوصلك تأكيد.")
+                    text=f"🔊 هحفظ الصوت «{m_snd.group(1)}» — دقايق ويوصلك تأكيد ونوعه.")
             elif text.startswith("/status") or text.startswith("/start"):
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
             elif not reply and (URL_IN.search(text) or _media(msg)):

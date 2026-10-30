@@ -416,8 +416,10 @@ def main(argv=None):
                 return
             try:
                 s = sounds.add(cfg, req["sound"], req)
-                msg = (f"🔊 اتحفظ الصوت «{req['sound']}» ({int(s['duration'])} ث) — مفيهوش موسيقى ✓\n"
-                       "هيتحط خلفية تحت الأحاديث المقروءة. /sounds تشوف المكتبة.")
+                msg = (f"🔊 اتحفظ الصوت «{req['sound']}» ({int(s['duration'])} ث) — "
+                       f"{sounds.KINDS.get(s['kind'], '❔')}" + (f": {s['summary']}" if s.get("summary") else "") +
+                       "\n/sounds تشوف المكتبة." + ("\n🌿 هادي، فممكن يتحط خلفية تحت الأحاديث المقروءة."
+                                                 if s["kind"] in sounds.BED_KINDS else ""))
             except sounds.SoundError as e:
                 msg = f"🔊 الصوت «{req['sound']}» متحفظش: {e}"
             if chat:
