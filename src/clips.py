@@ -171,10 +171,13 @@ def make_clips(cfg, req: dict) -> list[Path]:
     total = media_duration(src)
     # the range to use: what you asked for, else the whole thing (up to max_series_parts minutes)
     max_parts = int(cl.get("max_series_parts", 10))
+    # a video you shared in Telegram is used whole (no parts), up to full_max_seconds
+    full = bool(req.get("full")) and not req.get("n") and not req.get("sound_name")
+    full_max = float(cl.get("full_max_seconds", 180))
     if req.get("start") is not None:
         A, B = float(req["start"]), min(float(req["end"]), total)
     else:
-        A, B = 0.0, min(total, max_parts * hi + 30)
+        A, B = 0.0, min(total, (full_max + 30) if full else max_parts * hi + 30)
     truncated = B < total - 1 and req.get("start") is None
     audio = cut_audio(src, work / "part.mp3", A, B - A)
     size = video_size(src) if req.get("screen") and not req.get("sound_name") else None
@@ -199,6 +202,11 @@ def make_clips(cfg, req: dict) -> list[Path]:
         n = max(1, -(-int(B - A) // hi))
         windows = [(A + (B - A) * k / n, A + (B - A) * (k + 1) / n) for k in range(n)][:max_parts]
         series = len(windows) > 1
+    elif full and B - A <= full_max:
+        windows = [(A, B)]                                   # shared video: the whole of it
+    elif full:                                               # longer than full_max: up to the last
+        a, b = split_series(words, full_max, full_max - 40)[0]   # full sentence before it
+        windows = [(base + a, base + b)]
     elif B - A <= hi:
         windows = [(A, B)]                                   # one minute or less: one Reel
     elif B - A <= hi + 20 and not req.get("n"):              # a bit over: one Reel up to the last
@@ -250,6 +258,7 @@ def make_clips(cfg, req: dict) -> list[Path]:
                 "face_x": None, "flags": flags,
                 "transcript": " ".join(w["w"] for w in ws),
                 "sound": req.get("sound_name"),          # made on request from the sounds library
+                "full": full,
             }
             for s in segs:      # segment times relative to the padded clip start
                 d = clip["start"] - pad_a

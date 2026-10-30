@@ -965,7 +965,7 @@ def poll(cfg) -> bool:
                             text="الملف أكبر من 20 ميجا (حد تيليجرام للبوتات). ابعت لينك بداله أو قص الجزء المطلوب.")
                         continue
                     req["file_id"] = media["file_id"]
-                req.update(id=str(msg["message_id"]), msg_id=msg["message_id"],
+                req.update(id=str(msg["message_id"]), msg_id=msg["message_id"], full=True,
                            screen=bool((cfg.get("screens") or {}).get("enabled", True)))
                 clip_requests.append(req)
                 state.setdefault("shared", []).append({"id": req["id"], "at": datetime.now(timezone.utc)
@@ -974,8 +974,10 @@ def poll(cfg) -> bool:
                 if req.get("start") is not None:
                     a, b = int(req["start"]), int(req["end"])
                     when = f" من {a // 60}:{a % 60:02d} لـ {b // 60}:{b % 60:02d}"
+                elif req.get("n"):
+                    when = f" (هختار أحسن {req['n']} مقاطع)"
                 else:
-                    when = " (هختار أحسن جزء: جملة كاملة 20-60 ث)"
+                    when = " (هستخدمه كله من غير تقسيم، لحد 3 دقايق)"
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                     text=f"✅ استلمت{when}. هشغّله على شاشة (لابتوب / موبايل / تلفزيون) في مشهد من عندنا "
                          "بترجمة، وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")

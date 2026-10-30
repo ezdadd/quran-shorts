@@ -424,7 +424,9 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", v["audio_bitrate"],
                 "-movflags", "+faststart", str(out)], "lecture compose")
     from .qc import ensure                  # broken render -> render_clip retries with a safe look
-    ensure(out, total)
+    # a video you shared plays whole (up to clips.full_max_seconds); everything else stays a Short
+    ensure(out, total, max_len=float((cfg.get("clips") or {}).get("full_max_seconds", 180)) + 1
+           if rec.get("full") else 61)
     return out
 
 

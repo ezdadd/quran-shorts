@@ -66,8 +66,30 @@ def token_status(cfg) -> dict:
     return out
 
 
+REEL_MAX = 90.0          # Reels API limit; a longer shared clip goes out as a regular Page video
+
+
+@retry(wait=wait_exponential(min=5, max=60), stop=stop_after_attempt(3), reraise=True)
+def schedule_video(cfg, path: Path, description: str, due: datetime, title: str = "") -> dict:
+    """POST /<page-id>/videos (multipart), published=false + scheduled_publish_time."""
+    page, token = os.environ["FB_PAGE_ID"], os.environ["FB_PAGE_TOKEN"]
+    data = {"access_token": token, "description": description, "published": "false",
+            "scheduled_publish_time": str(int(due.timestamp()))}
+    if title:
+        data["title"] = title[:100]
+    with open(path, "rb") as f:
+        res = _check(requests.post(f"https://graph-video.facebook.com/{_ver(cfg)}/{page}/videos", data=data,
+                                   files={"source": (path.name, f, "video/mp4")}, timeout=900), "video upload")
+    log.info("facebook video %s scheduled for %s (longer than a Reel)", res.get("id"), due.isoformat())
+    return {"video_id": res.get("id"), "post_id": None, "scheduled_unix": int(due.timestamp()),
+            "uploaded_at": int(time.time()), "as": "video"}
+
+
 @retry(wait=wait_exponential(min=5, max=60), stop=stop_after_attempt(3), reraise=True)
 def schedule_reel(cfg, path: Path, description: str, due: datetime, title: str = "") -> dict:
+    from ..util import media_duration
+    if media_duration(path) > REEL_MAX:
+        return schedule_video(cfg, path, description, due, title)
     page, token = os.environ["FB_PAGE_ID"], os.environ["FB_PAGE_TOKEN"]
     g = f"https://graph.facebook.com/{_ver(cfg)}"
     start = _check(requests.post(f"{g}/{page}/video_reels",

@@ -23,7 +23,7 @@ class QCError(RuntimeError):
     pass
 
 
-def check(mp4: Path, expect: float | None = None, allow_silent: bool = False) -> list[str]:
+def check(mp4: Path, expect: float | None = None, allow_silent: bool = False, max_len: float = 61) -> list[str]:
     probs: list[str] = []
     try:
         info = json.loads(subprocess.run([FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json",
@@ -38,7 +38,7 @@ def check(mp4: Path, expect: float | None = None, allow_silent: bool = False) ->
     if not a:
         probs.append("no audio track")
     dur = float((info.get("format") or {}).get("duration") or 0)
-    if not 4 <= dur <= 61:
+    if not 4 <= dur <= max_len:
         probs.append(f"length {dur:.1f}s is not Shorts-sized")
     if expect and abs(dur - expect) > 1.5:
         probs.append(f"length {dur:.1f}s, planned {expect:.1f}s")
@@ -57,7 +57,7 @@ def check(mp4: Path, expect: float | None = None, allow_silent: bool = False) ->
     return probs
 
 
-def ensure(mp4: Path, expect: float | None = None, allow_silent: bool = False) -> None:
-    probs = check(mp4, expect, allow_silent)
+def ensure(mp4: Path, expect: float | None = None, allow_silent: bool = False, max_len: float = 61) -> None:
+    probs = check(mp4, expect, allow_silent, max_len)
     if probs:
         raise QCError("quality check failed: " + "; ".join(probs))
