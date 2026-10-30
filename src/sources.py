@@ -138,6 +138,13 @@ def main(argv=None):
         try:
             vids = latest({"list_url": listing_url(a.probe)}, 5)
             print("OK", len(vids), [(v["id"], v["duration"]) for v in vids])
+            from .clips import ClipError, fetch_audio      # can the audio itself be downloaded here?
+            from .util import cache_dir
+            try:
+                p, _ = fetch_audio(cfg, {"url": vids[0]["url"]}, cache_dir(cfg, "probe"))
+                print("DOWNLOAD OK", p.name, p.stat().st_size // 1024, "KB")
+            except ClipError as e:
+                print("DOWNLOAD FAIL", str(e)[:200])
         except Exception as e:
             print("FAIL", str(e)[:300])
         return
