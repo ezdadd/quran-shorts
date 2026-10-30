@@ -62,7 +62,8 @@ def fetch_audio(cfg, req: dict, work: Path) -> tuple[Path, dict]:
     opts = {"format": "bestaudio/best", "outtmpl": str(work / "src.%(ext)s"), "quiet": True,
             "noplaylist": True, "no_warnings": True, "retries": 3}
     if req.get("screen"):               # the picture is needed too (it plays on the device's screen)
-        opts.update(format="bv*[height<=1280]+ba/b[height<=1280]/b", merge_output_format="mp4")
+        opts.update(format="bv*[vcodec^=avc1][height<=1280]+ba/bv*[height<=1280]+ba/b[height<=1280]/b",
+                    merge_output_format="mp4")
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(req["url"], download=True)
@@ -89,13 +90,17 @@ def cut_audio(src: Path, out: Path, start: float = 0.0, dur: float | None = None
 
 
 def video_size(p: Path) -> tuple[int, int] | None:
-    """(width, height) of the picture, or None for a file without one."""
-    import cv2
-    cap = cv2.VideoCapture(str(p))
-    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    ok = cap.read()[0]
-    cap.release()
-    return (w, h) if ok and w and h else None
+    """(width, height) of the picture, or None for a file without one (FFprobe: reads any codec —
+    OpenCV can't decode the AV1 / VP9 some sites serve)."""
+    import subprocess
+    from .util import FFPROBE
+    r = subprocess.run([FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries",
+                        "stream=width,height,codec_name", "-of", "csv=p=0", str(p)], capture_output=True, text=True)
+    parts = (r.stdout.strip().splitlines() or [""])[0].split(",")
+    if len(parts) < 3 or parts[0] in ("mjpeg", "png") or not parts[1].isdigit():   # cover art isn't a video
+        return None
+    w, h = int(parts[1]), int(parts[2])
+    return (w, h) if w and h else None
 
 
 def cut_video(src: Path, out: Path, start: float = 0.0, dur: float | None = None) -> Path:
@@ -151,7 +156,7 @@ def split_series(words: list[dict], target: float = 60.0, lo: float = 40.0) -> l
             best = max(i, j - 1)
         parts.append([us[i]["s"], us[best]["e"]])
         i = best + 1
-    if len(parts) > 1 and parts[-1][1] - parts[-1][0] < 15 and parts[-1][1] - parts[-2][0] <= target + 20:
+    if len(parts) > 1 and parts[-1][1] - parts[-1][0] < 15 and parts[-1][1] - parts[-2][0] <= target:
         parts[-2][1] = parts.pop()[1]
     return [(a, b) for a, b in parts]
 
@@ -174,6 +179,9 @@ def make_clips(cfg, req: dict) -> list[Path]:
     audio = cut_audio(src, work / "part.mp3", A, B - A)
     size = video_size(src) if req.get("screen") and not req.get("sound_name") else None
     media = cut_video(src, work / "part.mp4", A, B - A) if size else audio
+    if req.get("screen"):
+        log.info("shared video: %s", f"picture {size[0]}x{size[1]} -> screen look" if size else
+                 "no picture -> our footage")
     # a library sound without speech (song, nature...): no transcription, no subtitles
     words = [] if req.get("no_subs") else asr.transcribe(cfg, audio)
     from .agent import memory
@@ -191,8 +199,11 @@ def make_clips(cfg, req: dict) -> list[Path]:
         n = max(1, -(-int(B - A) // hi))
         windows = [(A + (B - A) * k / n, A + (B - A) * (k + 1) / n) for k in range(n)][:max_parts]
         series = len(windows) > 1
-    elif B - A <= hi + 5:
+    elif B - A <= hi:
         windows = [(A, B)]                                   # one minute or less: one Reel
+    elif B - A <= hi + 20 and not req.get("n"):              # a bit over: one Reel up to the last
+        a, b = split_series(words, hi, max(lo, hi - 20))[0]  # full sentence, the short tail dropped
+        windows = [(base + a, base + b)]
     elif req.get("n"):                                       # "3 مقاطع": the best N moments
         chosen = pick(candidates(words, lo, hi), int(req["n"]))
         if not chosen:
