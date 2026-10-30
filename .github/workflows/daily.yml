@@ -66,8 +66,25 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: System packages (FFmpeg)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      # FFmpeg: a static build kept in the cache (~2 s) instead of apt (~22 s); apt only as a fallback
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-btbn-n8.1-gpl
+
+      - name: FFmpeg
+        run: |
+          if [ ! -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            mkdir -p "$HOME/ffmpeg"
+            curl -sfL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz \
+              | tar -xJ -C "$HOME/ffmpeg" --strip-components=1 || rm -rf "$HOME/ffmpeg/bin"
+          fi
+          if [ -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            echo "$HOME/ffmpeg/bin" >> "$GITHUB_PATH"
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
 
       - name: Python packages
         run: pip install -r requirements.txt faster-whisper==1.2.1 ctranslate2==4.8.4   # whisper checks the narration

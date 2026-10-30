@@ -216,6 +216,8 @@ def render(cfg, h: dict, vid: str, rng: random.Random, history: dict) -> tuple[P
                 "-r", str(FPS), "-c:v", "libx264", "-preset", v["preset"], "-crf", str(v["crf"]),
                 "-maxrate", v["maxrate"], "-bufsize", v["bufsize"], "-pix_fmt", "yuv420p", "-c:a", "aac",
                 "-b:a", v["audio_bitrate"], "-movflags", "+faststart", str(out)], "hadith compose")
+    from .qc import ensure                  # broken render -> make() skips it and takes another hadith
+    ensure(out, total, allow_silent=not voice and not amb)
     look = tpl.to_dict() | {"applied_color": color, "applied_background": style, "text_zone_luma": round(luma, 3)}
     return out, {"duration": total, "look": look, "footage": [c.id for c in clips], "category": category,
                  "ambience": amb.name if amb else None,

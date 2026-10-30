@@ -28,6 +28,14 @@ jobs:
       PYTHONIOENCODING: utf-8
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
       FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+      FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+      FB_APP_ID: ${{ secrets.FB_APP_ID }}
+      FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
+      CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
@@ -49,6 +57,10 @@ jobs:
           else
             python -m src.stats --collect
           fi
+
+      - name: Daily health check (Facebook, Buffer, Cloudinary, Gemini) — writes only if you're needed
+        if: always()
+        run: python -m src.health --check || true
 
       - name: Save
         run: |

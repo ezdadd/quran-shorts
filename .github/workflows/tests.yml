@@ -1,0 +1,44 @@
+name: tests
+
+# Every push: the fast checks in tests/ (no network, ~1 min). A failure is sent to Telegram at once
+# (jobs use main directly, so this warns — it does not block the change).
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "tools/**", "tests/**", "config.yaml", "requirements.txt", ".github/workflows/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Python packages
+        run: pip install -r requirements.txt pytest==8.4.2
+
+      - name: Tests
+        run: python -m pytest -q tests
+
+      - name: Alert on failure
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: >
+          python -c "from src.util import load_config; load_config();
+          from src.publish.notify import send;
+          send('🧪 آخر تحديث في الكود فشل في الاختبارات — ممكن يأثر على الفيديوهات الجاية، محتاج مراجعة: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}')"

@@ -10,7 +10,7 @@ import random
 import shutil
 from datetime import date, timedelta
 
-from . import ambience, footage, quran, templates
+from . import ambience, footage, qc, quran, templates
 from .align import AlignError
 from .publish import meta
 from .render import TooLong, compose
@@ -110,6 +110,7 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
             mp4 = out_dir / f"{vid}.mp4"
             try:
                 info = compose(cfg, rng, tr, rec, clips, amb, tpl, mp4, work)
+                qc.ensure(mp4, info["duration"])   # broken render -> the replacement path below
             except TooLong as e:
                 log.info("skip: %s", e)
                 continue

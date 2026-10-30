@@ -395,6 +395,8 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
                 "-crf", str(v["crf"]), "-maxrate", v["maxrate"], "-bufsize", v["bufsize"],
                 "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", v["audio_bitrate"],
                 "-movflags", "+faststart", str(out)], "lecture compose")
+    from .qc import ensure                  # broken render -> render_clip retries with a safe look
+    ensure(out, total)
     return out
 
 
