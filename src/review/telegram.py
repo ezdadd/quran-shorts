@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from ..clip_request import sound_name
 from ..util import ROOT, load_config, read_json, setup_logging, write_json
 from . import store
 
@@ -882,18 +883,17 @@ def poll(cfg) -> bool:
                              {"text": "🗑", "callback_data": f"s:del:{i}"}] for i, n in enumerate(names)][:40]
                     api("sendMessage", chat_id=me, text=f"🔊 مكتبة الأصوات ({len(names)}) — ▶️ تسمع · 🎬 تعمل منه فيديو على مشاهدنا · 🗑 تمسح\n(الأصوات دي مش بتدخل في فيديوهات القرآن والأحاديث أبدًا)",
                         reply_markup=json.dumps({"inline_keyboard": rows}))
-            elif not reply and (m_snd := re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$",
-                                                    text or msg.get("caption") or "")) \
-                    and (URL_IN.search(text or msg.get("caption") or "") or _media(msg)):
-                media = _media(msg)             # a sound for the library, not a clip
-                req = {"id": f"snd-{msg['message_id']}", "sound": m_snd.group(1), "msg_id": msg["message_id"]}
+            elif not reply and (URL_IN.search(text or msg.get("caption") or "") or _media(msg)) \
+                    and (snd := sound_name(text or msg.get("caption") or "")):
+                media = _media(msg)             # link / video + a plain name = a sound for the library, not a clip
+                req = {"id": f"snd-{msg['message_id']}", "sound": snd, "msg_id": msg["message_id"]}
                 if media:
                     req["file_id"] = media["file_id"]
                 else:
                     req["url"] = URL_IN.search(text or msg.get("caption") or "").group(0)
                 clip_requests.append(req)
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
-                    text=f"🔊 هحفظ الصوت «{m_snd.group(1)}» — دقايق ويوصلك تأكيد ونوعه.")
+                    text=f"🔊 هحفظ صوت الفيديو ده باسم «{snd}» في المكتبة (مش هعمل منه فيديو) — دقايق ويوصلك تأكيد.")
             elif text.startswith("/status") or text.startswith("/start"):
                 api("sendMessage", chat_id=me, text=_status_text(cfg, reviews) or "مفيش فيديوهات")
             elif not reply and (URL_IN.search(text) or _media(msg)):

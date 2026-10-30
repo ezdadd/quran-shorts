@@ -42,3 +42,19 @@ def parse_request(text: str) -> dict:
         if n:
             req["n"] = max(1, min(5, int(n.group(1))))
     return req
+
+
+def sound_name(text: str) -> str | None:
+    """A link (or a sent video) with a plain name next to it = save it as a sound, not a clip.
+    "صوت: <name>" always counts; otherwise the leftover text must not hold any clip instruction
+    (time range, الشيخ, عنوان:, N مقاطع) and must contain letters."""
+    m = re.search(r"(?m)^\s*(?:صوت|sound)\s*[:：]\s*(.+?)\s*$", text or "")
+    if m:
+        return m.group(1).strip()[:40]
+    rest = URL_RE.sub(" ", text or "").strip()
+    if not rest or not re.search(r"[^\W\d_]", rest):
+        return None                         # the link alone -> a clip, as before
+    req = parse_request(text)
+    if any(k in req for k in ("start", "sheikh", "title", "n")):
+        return None                         # clip instructions -> a clip
+    return re.sub(r"\s+", " ", rest).strip(" -–—:،,")[:40] or None
