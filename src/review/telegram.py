@@ -297,7 +297,31 @@ def _token() -> str:
 
 
 def owner() -> str:
-    return str(os.environ.get("TELEGRAM_CHAT_ID", "")).strip()
+    """Where the bot talks: the control group once you linked one (a group with the bot and the
+    people who help you — set up from Telegram, see worker/bot.js), else your private chat."""
+    return str(read_json(STATE, {}).get("chat") or os.environ.get("TELEGRAM_CHAT_ID", "")).strip()
+
+
+def allowed() -> set[str]:
+    """Chats the bot obeys: the control group and your own private chat."""
+    return {owner(), str(os.environ.get("TELEGRAM_CHAT_ID", "")).strip()} - {""}
+
+
+def sync_control_chat(state: dict) -> None:
+    """The Worker knows which group you linked (GET /config); keep it in the shared records so
+    every job (daily videos, clips...) posts there."""
+    w, k = os.environ.get("WORKER_URL"), os.environ.get("WORKER_KEY")
+    if not (w and k):
+        return
+    try:
+        c = str(requests.get(w.rstrip("/") + "/config", headers={"x-worker-key": k}, timeout=20)
+                .json().get("control_chat") or "")
+    except (requests.RequestException, ValueError):
+        return
+    if c and c != str(state.get("chat") or ""):
+        state["chat"] = c
+        write_json(STATE, state)        # owner() reads the file: the rest of this run uses the group
+        log.info("control chat is now %s", c)
 
 
 def api(method: str, files=None, http_timeout=60, **params):
@@ -782,8 +806,9 @@ def poll(cfg) -> bool:
     """Process pending updates. Returns True when the daily workflow should run again now
     (a video for today was approved, or something was rejected and needs a replacement)."""
     state = read_json(STATE, {"offset": 0})
+    sync_control_chat(state)
     reviews = store.load()
-    me = owner()
+    ok = allowed()
     today = datetime.now(ZoneInfo(cfg["timezone"])).date().isoformat()
     rerun = False
     clip_requests: list[dict] = []
@@ -792,8 +817,10 @@ def poll(cfg) -> bool:
     for u in updates:
         state["offset"] = u["update_id"] + 1
         cq, msg = u.get("callback_query"), u.get("message")
+        # answer in the chat the update came from (the group, or your private chat)
+        me = str(((cq or {}).get("message") or msg or {}).get("chat", {}).get("id", ""))
         if cq:
-            if str(cq["from"]["id"]) != me and str(cq["message"]["chat"]["id"]) != me:
+            if me not in ok:
                 continue
             if cq["data"].startswith("g:"):     # the /generate menu
                 generate_callback(cfg, cq)
@@ -898,9 +925,9 @@ def poll(cfg) -> bool:
             except TelegramError:
                 pass
         elif msg:
-            if str(msg["chat"]["id"]) != me:
+            if me not in ok:
                 continue
-            text = (msg.get("text") or "").strip()
+            text = re.sub(r"^(/\w+)@\w+", r"\1", (msg.get("text") or "").strip())   # "/que@bot" in a group
             reply = msg.get("reply_to_message")
             if text.startswith("/help"):
                 api("sendMessage", chat_id=me, text=HELP)

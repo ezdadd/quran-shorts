@@ -111,7 +111,7 @@ def main() -> None:
 
     # 4) Telegram -> worker, GitHub poller -> worker
     tg("setWebhook", url=f"{url}/tg", secret_token=tg_secret,
-       allowed_updates=["message", "callback_query"])
+       allowed_updates=["message", "callback_query", "my_chat_member"])
     gh_secret("WORKER_URL", url)
     gh_secret("WORKER_KEY", key)
     info = tg("getWebhookInfo")

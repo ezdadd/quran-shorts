@@ -9,6 +9,10 @@
 //
 // Bindings: KV namespace UPDATES. Secrets: TG_TOKEN, TG_SECRET (webhook header), CHAT_ID,
 // WORKER_KEY (for /updates and /ack), GH_TOKEN (actions:write), REPO ("owner/name").
+//
+// Control group (more people in control): add the bot to a Telegram group with them and make it
+// an admin there; the owner gets a "use this group" button privately. From then on the bot posts
+// in the group and obeys the group + the owner's private chat. GET /config tells the GitHub jobs.
 
 const MAKE_CRON = "7 */3 * * *";   // must match tools/deploy_worker.py
 const MENU_URL = (env) => `https://raw.githubusercontent.com/${env.REPO}/main/data/bot_menu.json`;
@@ -18,8 +22,10 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (req.method === "POST" && url.pathname === "/tg") return telegram(req, env, ctx);
-    if (url.pathname === "/updates" || url.pathname === "/ack") {
+    if (url.pathname === "/updates" || url.pathname === "/ack" || url.pathname === "/config") {
       if (req.headers.get("x-worker-key") !== env.WORKER_KEY) return new Response("forbidden", { status: 403 });
+      if (url.pathname === "/config")
+        return Response.json({ control_chat: (await env.UPDATES.get("control_chat")) || "" });
       return url.pathname === "/updates" ? listUpdates(env) : ack(req, env);
     }
     return new Response("ok");
@@ -38,8 +44,28 @@ async function telegram(req, env, ctx) {
     return new Response("forbidden", { status: 403 });
   const u = await req.json();
   const cq = u.callback_query, msg = u.message;
-  const chat = String((cq && cq.message && cq.message.chat.id) || (msg && msg.chat.id) || "");
-  if (chat !== String(env.CHAT_ID)) return new Response("ignored");   // only the owner is obeyed
+  const chat = String((cq && cq.message && cq.message.chat.id) || (msg && msg.chat.id) ||
+                      (u.my_chat_member && u.my_chat_member.chat.id) || "");
+  const control = (await env.UPDATES.get("control_chat")) || "";
+  const owner = String(env.CHAT_ID);
+  if (msg && msg.migrate_to_chat_id && chat === control) {        // group became a supergroup: new id
+    await env.UPDATES.put("control_chat", String(msg.migrate_to_chat_id));
+    return new Response("ok");
+  }
+  if (msg && msg.migrate_from_chat_id && String(msg.migrate_from_chat_id) === control) {
+    await env.UPDATES.put("control_chat", chat);
+    return new Response("ok");
+  }
+  if (cq && cq.data && cq.data.startsWith("link:") && chat === owner) {   // owner: "use this group"
+    ctx.waitUntil(linkGroup(env, cq));
+    return new Response("ok");
+  }
+  if (chat !== owner && chat !== control) {      // anyone else is ignored; a new group is offered
+    const c = (msg && msg.chat) || (u.my_chat_member && u.my_chat_member.chat);
+    if (c && (c.type === "group" || c.type === "supergroup")) ctx.waitUntil(offerGroup(env, c));
+    return new Response("ignored");
+  }
+  if (!cq && !msg) return new Response("ok");
 
   if (cq && cq.data === "g:s") {               // ask for the passage (your reply goes to the poller)
     ctx.waitUntil(Promise.all([
@@ -56,7 +82,7 @@ async function telegram(req, env, ctx) {
     ctx.waitUntil(menuStep(env, cq));          // pure navigation: instant, nothing to store
     return new Response("ok");
   }
-  if (msg && /^\/generate\s*$/.test(msg.text || "")) {
+  if (msg && /^\/generate(@\w+)?\s*$/.test(msg.text || "")) {
     ctx.waitUntil(sendMenu(env, msg.chat.id));
     return new Response("ok");
   }
@@ -99,6 +125,38 @@ async function dispatch(env, u, workflow = "telegram.yml") {
 }
 
 // ---------------------------------------------------------------- poller API
+// ---------------------------------------------------------------- control group
+async function offerGroup(env, c) {
+  const id = String(c.id);
+  if (await env.UPDATES.get(`grp:${id}`)) return;              // asked about this group already
+  await env.UPDATES.put(`grp:${id}`, JSON.stringify({ title: c.title || "" }), { expirationTtl: 7 * 86400 });
+  await tg(env, "sendMessage", { chat_id: env.CHAT_ID,
+    text: `🤝 البوت اتضاف لجروب «${c.title || id}».\nلو عايز الجروب ده يبقى جروب التحكم (الفيديوهات والأزرار ` +
+          "تروح هناك، وكل اللي في الجروب يقدر يوافق ويرفض ويعدّل ويبعت لينكات)، دوس تحت.\n" +
+          "مهم: خلّي البوت أدمن في الجروب عشان يشوف الرسايل واللينكات.",
+    reply_markup: { inline_keyboard: [[{ text: "✅ استخدم الجروب ده", callback_data: `link:${id}` }]] } });
+}
+
+async function linkGroup(env, cq) {
+  const id = cq.data.slice(5);
+  const g = await env.UPDATES.get(`grp:${id}`, "json");
+  if (!g) {
+    await tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "انتهت — شيل البوت من الجروب وضيفه تاني" });
+    return;
+  }
+  await env.UPDATES.put("control_chat", id);
+  await Promise.all([
+    tg(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "اتربط ✅" }),
+    tg(env, "editMessageText", { chat_id: cq.message.chat.id, message_id: cq.message.message_id,
+      text: `✅ جروب «${g.title || id}» بقى جروب التحكم. الفيديوهات الجديدة والأزرار هتروح هناك، ` +
+            "وتقدر برضو تكلم البوت هنا عادي." }),
+    tg(env, "sendMessage", { chat_id: id,
+      text: "✅ الجروب ده بقى جروب التحكم في ازْدَدْ.\nأي حد هنا يقدر يوافق ✅ ويرفض ❌ ويعدّل الترجمة ويبعت " +
+            "لينكات ويستخدم /generate و /que. الفيديوهات الجديدة هتوصل هنا." }),
+  ]);
+  await dispatch(env, null);                   // the GitHub side picks the group up right away
+}
+
 async function listUpdates(env) {
   const out = [];
   let cursor;
