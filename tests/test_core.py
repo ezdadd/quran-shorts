@@ -311,3 +311,92 @@ def test_quality_check_flags_broken_videos(tmp_path):
     probs = qc.check(bad)
     assert any("black" in p for p in probs) and any("silent" in p for p in probs)
     assert qc.check(bad, allow_silent=True) == [p for p in probs if "silent" not in p]
+
+
+# ---------------------------------------------------------------- regressions from the 2026-10-31 incidents
+@pytest.mark.skipif(any(__import__("shutil").which(t) is None for t in ("bash", "git", "rsync")),
+                    reason="needs bash, git and rsync (runs on GitHub)")
+def test_parallel_jobs_never_lose_their_records(tmp_path):
+    """Two jobs save at once on a runner with NO git identity (exactly what lost 6 clips): both
+    records must land, a file both changed keeps the later job's version."""
+    import os
+    import shutil
+    import subprocess
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR", "GIT_COMMITTER"))}
+    env.update(HOME=str(tmp_path / "home"), GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+               STATE_TOKEN="x", GITHUB_RUN_ID="1")
+    bare = tmp_path / "state.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True, env=env)
+    seed = tmp_path / "seed"
+    subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True, env=env)
+    (seed / "queue").mkdir()
+    (seed / "queue" / "old.json").write_text("{}")
+    g = ["git", "-C", str(seed), "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(g + ["add", "-A"], check=True, env=env)
+    subprocess.run(g + ["commit", "-q", "-m", "seed"], check=True, env=env)
+    subprocess.run(g + ["push", "-q", "origin", "HEAD:main"], check=True, env=env)
+    env["STATE_URL"] = bare.as_uri()
+
+    def job(name: str) -> Path:
+        d = tmp_path / name
+        (d / "tools").mkdir(parents=True)
+        shutil.copy(ROOT / "tools" / "state.sh", d / "tools" / "state.sh")
+        r = subprocess.run(["bash", "tools/state.sh", "pull"], cwd=d, env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        return d
+
+    a, b = job("a"), job("b")                       # both start from the same records
+    for d, n in ((a, "a"), (b, "b")):
+        (d / "queue" / f"{n}.json").write_text("{}")
+        (d / "data").mkdir(exist_ok=True)
+        (d / "data" / "reviews.json").write_text(json.dumps({"by": n}))
+    for d in (a, b):
+        r = subprocess.run(["bash", "tools/state.sh", "save", "test"], cwd=d, env=env, capture_output=True, text=True)
+        assert r.returncode == 0 and "saved" in r.stdout, r.stdout + r.stderr
+    check = tmp_path / "check"
+    subprocess.run(["git", "clone", "-q", str(bare), str(check)], check=True, env=env)
+    assert {p.name for p in (check / "queue").glob("*.json")} == {"old.json", "a.json", "b.json"}
+    assert json.loads((check / "data" / "reviews.json").read_text()) == {"by": "b"}
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs FFmpeg")
+def test_review_copy_fits_the_telegram_limit(tmp_path, monkeypatch):
+    """A 3-minute clip was too big for the bot (50 MB): a lighter copy is sent instead."""
+    from src.review import telegram
+    from src.util import run_ffmpeg
+    v = tmp_path / "big.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "testsrc2=s=540x960:d=4", "-f", "lavfi", "-i", "sine=d=4", "-c:v", "libx264",
+                "-crf", "4", "-c:a", "aac", "-shortest", str(v)], "test")
+    assert telegram.review_copy(v) == v                       # small enough: sent as it is
+    monkeypatch.setattr(telegram, "TG_MAX", v.stat().st_size // 3)
+    out = telegram.review_copy(v)
+    assert out != v and out.stat().st_size <= telegram.TG_MAX
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs FFmpeg")
+def test_long_shared_clip_length_rules(tmp_path):
+    """A shared clip may be up to 3 min; everything else stays a <= 61 s Short."""
+    from src import qc
+    from src.util import run_ffmpeg
+    v = tmp_path / "long.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "color=gray:s=1080x1920:r=2:d=70", "-f", "lavfi", "-i", "sine=d=70",
+                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(v)], "test")
+    assert any("Shorts-sized" in p for p in qc.check(v))
+    assert not any("Shorts-sized" in p for p in qc.check(v, max_len=181))
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs FFmpeg")
+def test_video_probe_reads_codecs_opencv_cannot(tmp_path):
+    """Facebook served VP9/AV1 and the clip was treated as sound-only: probing must use FFprobe."""
+    import subprocess
+    from src.clips import video_size
+    from src.util import FFMPEG
+    v = tmp_path / "vp9.webm"
+    r = subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x568:d=1", "-c:v", "libvpx-vp9",
+                        "-b:v", "200k", str(v)], capture_output=True)
+    if r.returncode:
+        pytest.skip("this FFmpeg has no VP9 encoder")
+    assert video_size(v) == (320, 568)
+    a = tmp_path / "a.m4a"
+    subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "sine=d=1", str(a)], check=True)
+    assert video_size(a) is None

@@ -6,7 +6,8 @@
 #   bash tools/state.sh pull            # after actions/checkout
 #   bash tools/state.sh save "message"  # at the end (if: always())
 #
-# env: STATE_TOKEN (a token that can push to the private repo), STATE_REPO (default <owner>/quran-shorts-data)
+# env: STATE_TOKEN (a token that can push to the private repo), STATE_REPO (default <owner>/quran-shorts-data),
+#      STATE_URL (tests: a local repo instead)
 set -euo pipefail
 REPO="${STATE_REPO:-${GITHUB_REPOSITORY%%/*}/quran-shorts-data}"
 DIR=_state
@@ -20,7 +21,7 @@ case "${1:-}" in
   pull)
     : "${STATE_TOKEN:?STATE_TOKEN secret missing}"
     rm -rf "$DIR"
-    git clone -q --depth 1 "https://x-access-token:${STATE_TOKEN}@github.com/${REPO}.git" "$DIR"
+    git clone -q --depth 1 "${STATE_URL:-https://x-access-token:${STATE_TOKEN}@github.com/${REPO}.git}" "$DIR"
     # identity for the commit AND for "pull --rebase" (it rewrites commits when jobs save at once)
     git -C "$DIR" config user.name "quran-shorts bot"
     git -C "$DIR" config user.email "bot@users.noreply.github.com"
