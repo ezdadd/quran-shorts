@@ -54,6 +54,9 @@ case "${1:-}" in
       git rebase --abort 2>/dev/null || true
       sleep $((i * 5))
     done
+    # never lose a job's work: park it on its own branch (merge it later), and fail loudly
+    git push -q origin "HEAD:refs/heads/rescue-${GITHUB_RUN_ID:-$(date +%s)}" && \
+      echo "state: could not merge — saved on branch rescue-${GITHUB_RUN_ID:-?}" >&2
     echo "state: could not push after 5 tries" >&2
     exit 1
     ;;

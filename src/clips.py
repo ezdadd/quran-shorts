@@ -343,7 +343,8 @@ def _queued(vid: str) -> dict:
     from .util import read_json
     r = read_json(QUEUE / f"{vid}.json", None)
     if r is None:
-        raise ClipError(f"مش لاقي المقطع {vid}")
+        raise ClipError(f"مش لاقي سجل المقطع {vid} — لو اتبعت من شوية ممكن يكون لسه بيتعمل من جديد؛ "
+                        "استنى النسخة الجديدة توصلك ودوس 🤖 عليها هي.")
     if r.get("published"):
         raise ClipError("المقطع ده اتجدول/اتنشر خلاص — التعديل مش هيوصل للمنصات")
     return r
@@ -536,13 +537,17 @@ def main(argv=None):
                               "أو دوس «أعد التصحيح» يجرب تاني دلوقتي.",
                          reply_markup=json.dumps({"inline_keyboard": [[{"text": "🔁 أعد التصحيح",
                                                                         "callback_data": f"f:{vid}"}]]}))
-        raise SystemExit(1)
+        if not chat:
+            raise SystemExit(1)         # told you already: no second "job failed" alert
     except ClipError as e:
         log.error("%s", e)
         if chat:
-            telegram.api("sendMessage", chat_id=chat, text=f"⚠️ المقطع ده متعملش:\n{e}",
+            head = "⚠️ المقطع ده متعملش" if not (req.get("autofix") or req.get("edit") or req.get("photo")) \
+                else f"⚠️ {req.get('autofix') or req.get('edit') or req.get('photo')}"
+            telegram.api("sendMessage", chat_id=chat, text=f"{head}:\n{e}",
                          **({"reply_to_message_id": req["msg_id"]} if req.get("msg_id") else {}))
-        raise SystemExit(1)
+        else:
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":
