@@ -34,7 +34,13 @@ QUERIES = ["laptop green screen", "laptop chroma key", "computer green screen de
            "phone green screen hand", "mobile mockup green screen", "tablet green screen", "ipad green screen",
            "tv green screen", "television green screen living room", "old tv green screen", "vintage tv chroma key",
            "smart tv mockup green screen", "cinema screen green screen", "projector screen green screen",
-           "billboard green screen", "laptop mockup", "phone mockup", "tv mockup"]
+           "billboard green screen", "laptop mockup", "phone mockup", "tv mockup",
+           # more phones: vertical clips go on a phone most of the time
+           "vertical phone green screen", "smartphone green screen vertical", "phone on table green screen",
+           "phone on desk chroma key", "phone coffee green screen", "phone sofa green screen",
+           "phone car green screen", "holding phone green screen", "smartphone in hand chroma key",
+           "iphone green screen", "mobile phone chroma key vertical", "scrolling phone green screen",
+           "phone stand green screen", "phone tripod green screen"]
 KINDS = [("phone", ("phone", "smartphone", "mobile", "iphone")), ("tablet", ("tablet", "ipad")),
          ("tv", ("tv", "television")), ("laptop", ("laptop", "notebook", "macbook")),
          ("monitor", ("monitor", "computer", "imac", "desktop")), ("cinema", ("cinema", "projector", "theater")),

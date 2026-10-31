@@ -268,7 +268,83 @@ def scene_file(cfg, sid: str) -> Path:
     s = library().get(sid)
     if not s:
         raise ScreenError(f"scene {sid} is not in the library")
-    return download(s["url"], cache_dir(cfg, "screens") / f"{sid}.mp4")
+    out = cache_dir(cfg, "screens") / f"{sid}.mp4"
+    if s.get("virtual"):                # our own phone over modesty-checked footage: built from its recipe
+        return out if out.exists() and out.stat().st_size else render_virtual(cfg, s["virtual"], out)
+    return download(s["url"], out)
+
+
+# ---------------------------------------------------------------- virtual phone scenes
+# Pixabay has few usable phone green screens, and vertical clips go on a phone most of the time, so
+# we also draw one: a phone (bezel, Dynamic Island, side buttons, soft shadow, a little tilt that
+# drifts gently) floating over a background clip from our footage library — already checked for
+# modesty — blurred like a shallow depth of field. Its screen is green, so compose() treats it like
+# any other scene. Only the recipe is stored (data/screens.json); the video is rebuilt when needed.
+PHONE_COLORS = {"black": (24, 24, 26), "silver": (198, 200, 204), "gold": (150, 178, 205),
+                "blue": (92, 60, 32), "green": (60, 78, 52)}      # BGR
+VW, VH, VSEC = 1920, 1080, 8.0
+
+
+def _phone_sprite(color: str) -> np.ndarray:
+    """BGRA phone, upright, 400x840 plus margin for the shadow."""
+    pw, ph, pad = 400, 840, 60
+    img = np.zeros((ph + 2 * pad, pw + 2 * pad, 4), np.uint8)
+    body = PHONE_COLORS.get(color, PHONE_COLORS["black"])
+
+    def rrect(a, x0, y0, x1, y1, r, col):
+        cv2.rectangle(a, (x0 + r, y0), (x1 - r, y1), col, -1, cv2.LINE_AA)
+        cv2.rectangle(a, (x0, y0 + r), (x1, y1 - r), col, -1, cv2.LINE_AA)
+        for cx, cy in ((x0 + r, y0 + r), (x1 - r, y0 + r), (x0 + r, y1 - r), (x1 - r, y1 - r)):
+            cv2.circle(a, (cx, cy), r, col, -1, cv2.LINE_AA)
+
+    x0, y0 = pad, pad
+    rrect(img, x0 - 5, y0 + 150, x0 + 4, y0 + 230, 3, (*body, 255))        # side buttons
+    rrect(img, x0 + pw - 4, y0 + 190, x0 + pw + 5, y0 + 300, 3, (*body, 255))
+    rrect(img, x0, y0, x0 + pw, y0 + ph, 64, (*body, 255))                 # body
+    edge = tuple(min(255, c + 45) for c in body)
+    rrect(img, x0 + 4, y0 + 4, x0 + pw - 4, y0 + ph - 4, 60, (*edge, 255))   # lit rim
+    rrect(img, x0 + 7, y0 + 7, x0 + pw - 7, y0 + ph - 7, 58, (14, 14, 16, 255))  # black bezel
+    rrect(img, x0 + 18, y0 + 18, x0 + pw - 18, y0 + ph - 18, 48, (0, 255, 0, 255))  # the screen (keyed)
+    rrect(img, x0 + pw // 2 - 52, y0 + 34, x0 + pw // 2 + 52, y0 + 66, 16, (8, 8, 8, 255))  # Dynamic Island
+    return img
+
+
+def render_virtual(cfg, spec: dict, out: Path) -> Path:
+    """spec: {bg (footage URL), style, x (0-1 centre), tilt (-0.05..0.05), blur (px)}"""
+    work = cache_dir(cfg, "screens", "bg")
+    bg = download(spec["bg"], work / f"{spec.get('bg_id', out.stem).replace(':', '_')}.mp4")
+    sprite = _phone_sprite(spec.get("style", "black"))
+    sh, sw = sprite.shape[:2]
+    blur = int(spec.get("blur", 8))
+    frames = _reader(["-stream_loop", "-1", "-i", str(bg), "-t", f"{VSEC}", "-vf",
+                      f"fps={FPS},scale={VW}:{VH}:force_original_aspect_ratio=increase,crop={VW}:{VH}"
+                      + (f",gblur=sigma={blur}" if blur else "") + ",eq=brightness=-0.04"], VW, VH)
+    enc = subprocess.Popen([FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{VW}x{VH}",
+                            "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+                            "-pix_fmt", "yuv420p", str(out)], stdin=subprocess.PIPE)
+    cx, cy, tilt = float(spec.get("x", 0.5)) * VW, VH * 0.5, float(spec.get("tilt", 0.0))
+    src = np.float32([[0, 0], [sw, 0], [sw, sh], [0, sh]])
+    n = 0
+    try:
+        for i, f in enumerate(frames):
+            t = i / FPS
+            dy = 7 * np.sin(2 * np.pi * t / VSEC)                     # a gentle float, loops cleanly
+            tl = tilt * (1 + 0.25 * np.sin(2 * np.pi * t / VSEC))
+            hw, hh = sw / 2, sh / 2
+            dst = np.float32([[cx - hw * (1 - tl), cy - hh + dy], [cx + hw * (1 + tl), cy - hh * (1 - abs(tl)) + dy],
+                              [cx + hw * (1 + tl), cy + hh * (1 - abs(tl)) + dy], [cx - hw * (1 - tl), cy + hh + dy]])
+            M = cv2.getPerspectiveTransform(src, dst)
+            layer = cv2.warpPerspective(sprite, M, (VW, VH), flags=cv2.INTER_LINEAR)
+            a = layer[..., 3:].astype(np.float32) / 255
+            shadow = cv2.GaussianBlur(np.roll(layer[..., 3], (28, 18), (0, 1)), (0, 0), 22).astype(np.float32) / 255
+            base = f.astype(np.float32) * (1 - 0.45 * shadow[..., None])
+            enc.stdin.write((base * (1 - a) + layer[..., :3] * a).astype(np.uint8).tobytes())
+            n += 1
+    finally:
+        enc.stdin.close()
+    if enc.wait() != 0 or n < FPS:
+        raise ScreenError("virtual phone scene failed")
+    return out
 
 
 def layout(info: dict, frame: str) -> tuple[tuple[int, int, int, int], tuple[int, int]]:

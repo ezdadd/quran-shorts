@@ -482,3 +482,19 @@ def test_report_and_tuning_compare_clip_looks(tmp_path, monkeypatch):
     cfg = {"screens": {"tuning": {"device_weights": t["device_weights"]}}}
     picks = [screens.choose(cfg, random.Random(i), clip_portrait=False)["scene"] for i in range(400)]
     assert picks.count("p") > picks.count("t")      # the better device is chosen more often
+
+
+@pytest.mark.skipif(__import__("shutil").which("ffmpeg") is None, reason="needs FFmpeg")
+def test_virtual_phone_scene_is_a_usable_screen(tmp_path, monkeypatch):
+    """Our drawn phone over a background clip: one upright, steady green screen inside the picture."""
+    from src import screens
+    from src.util import run_ffmpeg
+    bg = tmp_path / "bg.mp4"
+    run_ffmpeg(["-f", "lavfi", "-i", "gradients=s=960x540:d=3:c0=0x203050:c1=0x806040", "-c:v", "libx264", str(bg)], "bg")
+    monkeypatch.setattr(screens, "download", lambda url, dest, **k: bg)
+    monkeypatch.setattr(screens, "VSEC", 2.0)
+    from src.util import load_config
+    out = screens.render_virtual(load_config(), {"bg": "x", "bg_id": "t:1", "style": "silver",
+                                                                 "x": 0.6, "tilt": 0.04, "blur": 6}, tmp_path / "v.mp4")
+    info = screens.survey(out)
+    assert info["portrait"] and 0.4 < info["aspect"] < 0.55
