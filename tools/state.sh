@@ -21,6 +21,9 @@ case "${1:-}" in
     : "${STATE_TOKEN:?STATE_TOKEN secret missing}"
     rm -rf "$DIR"
     git clone -q --depth 1 "https://x-access-token:${STATE_TOKEN}@github.com/${REPO}.git" "$DIR"
+    # identity for the commit AND for "pull --rebase" (it rewrites commits when jobs save at once)
+    git -C "$DIR" config user.name "quran-shorts bot"
+    git -C "$DIR" config user.email "bot@users.noreply.github.com"
     for d in $DIRS; do
       mkdir -p "$d" "$DIR/$d"
       rsync -a "${EXCL[@]}" "$DIR/$d/" "$d/"
@@ -46,7 +49,8 @@ case "${1:-}" in
     git -c user.name="quran-shorts bot" -c user.email="bot@users.noreply.github.com" \
         commit -q -m "${2:-state}"
     for i in 1 2 3 4 5; do
-      if git pull -q --rebase && git push -q; then echo "state: saved"; exit 0; fi
+      # same file changed by another job meanwhile: this job's version wins (-X theirs = ours, in a rebase)
+      if git pull -q --rebase -X theirs && git push -q; then echo "state: saved"; exit 0; fi
       git rebase --abort 2>/dev/null || true
       sleep $((i * 5))
     done

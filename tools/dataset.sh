@@ -17,6 +17,9 @@ case "${1:-}" in
     rm -rf "$DIR"
     git clone -q --depth 1 --filter=blob:none --sparse \
         "https://x-access-token:${STATE_TOKEN}@github.com/${REPO}.git" "$DIR"
+    # identity for the commit AND for "pull --rebase" (it rewrites commits when jobs save at once)
+    git -C "$DIR" config user.name "quran-shorts bot"
+    git -C "$DIR" config user.email "bot@users.noreply.github.com"
     echo "dataset: $(python3 -c "import json;print(len(json.load(open('$DIR/index.json'))))" 2>/dev/null || echo 0) clips so far"
     ;;
   save)
