@@ -668,9 +668,11 @@ def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
         if not sent or now - datetime.fromisoformat(sent) < delay:
             continue
         prev = started.get(r["id"])
-        if prev and (prev.get("tries", 0) >= 2 or now - datetime.fromisoformat(prev["at"]) < timedelta(hours=3)):
-            continue                    # running now, or already failed twice
-        started[r["id"]] = {"at": now.isoformat(timespec="seconds"), "tries": (prev or {}).get("tries", 0) + 1}
+        since = now - datetime.fromisoformat(prev["at"]) if prev else None
+        if prev and since < timedelta(hours=20) and (prev.get("tries", 0) >= 2 or since < timedelta(hours=3)):
+            continue                    # running now, or failed twice today (free quota used up)
+        tries = 0 if prev and since >= timedelta(hours=20) else (prev or {}).get("tries", 0)   # new day: again
+        started[r["id"]] = {"at": now.isoformat(timespec="seconds"), "tries": tries + 1}
         out.append({"id": f"auto-{r['id']}", "autofix": r["id"]})
         if len(out) >= int(a.get("max_per_poll", 1)):
             break                       # one at a time: parallel jobs hit the free tier's rate limit

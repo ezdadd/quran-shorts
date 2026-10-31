@@ -533,8 +533,10 @@ def main(argv=None):
         if chat:                        # (json is imported at module level — a local import here
             vid = req.get("autofix")    # made `json` unbound for the whole of main())
             telegram.api("sendMessage", chat_id=chat,
-                         text=f"🤖 المصحح مقدرش يراجع 🆔 {vid}: {e}\nالمقطع مستني موافقتك زي الأول، "
-                              "أو دوس «أعد التصحيح» يجرب تاني دلوقتي.",
+                         text=(f"🤖 حصة Gemini المجانية خلصت النهارده — المصحح هيراجع 🆔 {vid} تلقائي بكرة.\n"
+                               "المقطع مستني موافقتك زي الأول." if "مشغولة" in str(e) else
+                               f"🤖 المصحح مقدرش يراجع 🆔 {vid}: {e}\nالمقطع مستني موافقتك زي الأول، "
+                               "أو دوس «أعد التصحيح» يجرب تاني دلوقتي."),
                          reply_markup=json.dumps({"inline_keyboard": [[{"text": "🔁 أعد التصحيح",
                                                                         "callback_data": f"f:{vid}"}]]}))
         if not chat:

@@ -86,6 +86,17 @@ async function telegram(req, env, ctx) {
     ctx.waitUntil(sendMenu(env, msg.chat.id));
     return new Response("ok");
   }
+  // 🤖 pressed again while the corrector is already on that clip: one job is enough (several at
+  // once used up the free Gemini quota in minutes)
+  if (cq && cq.data && cq.data.startsWith("f:")) {
+    const k = `fix:${cq.data.slice(2)}`;
+    if (await env.UPDATES.get(k)) {
+      ctx.waitUntil(tg(env, "answerCallbackQuery", { callback_query_id: cq.id,
+        text: "🤖 المصحح شغال على المقطع ده بالفعل — النتيجة هتوصلك" }));
+      return new Response("ok");
+    }
+    await env.UPDATES.put(k, "1", { expirationTtl: 900 });
+  }
   // everything else: keep it for the poller and start it now
   await env.UPDATES.put(`u:${String(u.update_id).padStart(12, "0")}`, JSON.stringify(u),
                         { expirationTtl: 7 * 86400 });
