@@ -27,11 +27,31 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      # FFmpeg (cached static build) so the video checks run too, not just skip
+      - name: Cache FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: ~/ffmpeg
+          key: ffmpeg-btbn-n8.1-gpl
+
+      - name: FFmpeg
+        run: |
+          if [ ! -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            mkdir -p "$HOME/ffmpeg"
+            curl -sfL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz \
+              | tar -xJ -C "$HOME/ffmpeg" --strip-components=1 || rm -rf "$HOME/ffmpeg/bin"
+          fi
+          if [ -x "$HOME/ffmpeg/bin/ffmpeg" ]; then
+            echo "$HOME/ffmpeg/bin" >> "$GITHUB_PATH"
+          else
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          fi
+
       - name: Python packages
         run: pip install -r requirements.txt pytest==8.4.2
 
       - name: Tests
-        run: python -m pytest -q tests
+        run: python -m pytest -q -rs tests
 
       - name: Alert on failure
         if: failure() && github.event_name != 'pull_request'
