@@ -340,6 +340,11 @@ def _media(msg: dict) -> dict | None:
     return None
 
 
+def _has_speech(video_id: str) -> bool:
+    r = _record(video_id)[1]
+    return not r or any(s.get("type") == "speech" for s in r.get("segments") or [])
+
+
 def _kb(video_id: str, status: str | None) -> str:
     import json
     if status in ("approved", "rejected"):
@@ -347,7 +352,7 @@ def _kb(video_id: str, status: str | None) -> str:
     else:
         rows = [[{"text": "✅ موافقة", "callback_data": f"a:{video_id}"},
                  {"text": "❌ رفض وبدّل", "callback_data": f"r:{video_id}"}]]
-        if video_id.startswith(("c-", "l-")):      # spoken clips: run the correction agent now
+        if video_id.startswith(("c-", "l-")) and _has_speech(video_id):   # clips with subtitles only
             rows[0].insert(1, {"text": "🤖 صحّح", "callback_data": f"f:{video_id}"})
     return json.dumps({"inline_keyboard": rows})
 
@@ -466,6 +471,39 @@ def quran_check(cfg, r: dict) -> str | None:
     if not url or (r.get("hosting") or {}).get("deleted") or not hosting.url_is_public(url):
         return "ملف الفيديو مش موجود على الاستضافة"
     return None
+
+
+def plain_auto(cfg, reviews: dict) -> bool:
+    """A clip with no subtitles (a video you shared, used as it is) that you haven't touched for
+    publishing.auto_approve_hours: approve it if it is hosted and playable. Your ✅/❌/↩️ always wins."""
+    from ..publish import hosting
+    pc = cfg["publishing"]
+    if not pc.get("auto_approve", True):
+        return False
+    now = datetime.now(timezone.utc)
+    delay = timedelta(hours=float(pc.get("auto_approve_hours", 2)))
+    rerun = False
+    for p in sorted((ROOT / "queue").glob("c-*.json")):
+        r = read_json(p, {})
+        tg = r.get("telegram") or {}
+        if any(s.get("type") == "speech" for s in r.get("segments") or []) or r.get("published") \
+                or store.get(r["id"], reviews).get("status") or not tg.get("message_id") or not tg.get("sent_at"):
+            continue
+        if now - datetime.fromisoformat(tg["sent_at"]) < delay:
+            continue
+        url = (r.get("hosting") or {}).get("url")
+        if not url or (r.get("hosting") or {}).get("deleted") or not hosting.url_is_public(url) \
+                or not 3 <= float(r.get("duration") or 0) <= 181:
+            continue                    # something is off: it keeps waiting for you
+        store.set_status(reviews, r["id"], "approved", by="auto")
+        log.info("%s auto-approved (no subtitles, %g h untouched)", r["id"], delay.total_seconds() / 3600)
+        try:
+            api("editMessageCaption", chat_id=owner(), message_id=tg["message_id"], caption=_caption(r, reviews),
+                reply_markup=_kb(r["id"], "approved"))
+        except TelegramError:
+            pass
+        rerun = True
+    return rerun
 
 
 def fixed_auto(cfg, reviews: dict) -> bool:
@@ -1026,8 +1064,9 @@ def poll(cfg) -> bool:
                 else:
                     when = " (هستخدمه كله من غير تقسيم، لحد 3 دقايق)"
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
-                    text=f"✅ استلمت{when}. هشغّله على شاشة (لابتوب / موبايل / تلفزيون) في مشهد من عندنا "
-                         "بترجمة، وهيوصلك هنا للمراجعة خلال حوالي 10-20 دقيقة.")
+                    text=f"✅ استلمت{when}. هشغّله على شاشة (لابتوب / موبايل / تلفزيون) في مشهد من عندنا، "
+                         "من غير ترجمة: العنوان واللوجو بس. هيوصلك هنا للمراجعة خلال حوالي 10 دقايق، "
+                         "ولو معملتش حاجة خلال ساعتين بيتوافق عليه تلقائي.")
             elif reply and msg.get("photo"):    # a sheikh's photo for a clip -> circular Islamic frame
                 m = ID_RE.search(reply.get("caption") or reply.get("text") or "")
                 vid = m.group(1) if m else ""
@@ -1098,6 +1137,7 @@ def poll(cfg) -> bool:
     clip_requests += agent_due(cfg, reviews, state)
     rerun = quran_auto(cfg, reviews, today) or rerun
     rerun = fixed_auto(cfg, reviews) or rerun
+    rerun = plain_auto(cfg, reviews) or rerun
     if state.get("commands") != COMMANDS_VERSION:     # the bot's "/" menu
         try:
             import json

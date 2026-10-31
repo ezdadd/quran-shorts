@@ -383,6 +383,7 @@ agent:
 # المشاهد في data/screens.json (python -m tools.build_screens بيزوّدها ويفحصها)، ولكل فيديو شكل عشوائي
 screens:
   enabled: true
+  subtitles: false     # الفيديو اللي بتبعته بيتستخدم زي ما هو: من غير تفريغ ولا ترجمة ولا مصحح (العنوان واللوجو بس)
   phone_share: 0.7     # الفيديو الطولي: نسبة ما يتعرض على موبايل (والباقي لابتوب/تلفزيون)
   # looks: {camera: {push: 4, still: 2, pull: 2, drift: 2}, grade: {...}, title: {...}}  # لتغيير الأوزان
 

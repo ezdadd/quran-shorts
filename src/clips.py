@@ -185,20 +185,25 @@ def make_clips(cfg, req: dict) -> list[Path]:
     if req.get("screen"):
         log.info("shared video: %s", f"picture {size[0]}x{size[1]} -> screen look" if size else
                  "no picture -> our footage")
-    # a library sound without speech (song, nature...): no transcription, no subtitles
-    words = [] if req.get("no_subs") else asr.transcribe(cfg, audio)
+    # a video you shared: used as it is — no transcription, no subtitles, no correction review; just
+    # the hook line, our logo and handle on top. A library sound without speech: no subtitles either.
+    no_text = bool(req.get("screen")) and not req.get("sound_name") and \
+        not (cfg.get("screens") or {}).get("subtitles", False)
+    words = [] if req.get("no_subs") or no_text else asr.transcribe(cfg, audio)
     from .agent import memory
     fixed = memory.apply_rules(words, memory.rules(int((cfg.get("agent") or {}).get("learn_min_count", 2))))
     if fixed:
         log.info("applied %d learned fixes from your past corrections", fixed)
     base = A
     plain = not words
-    if plain and not req.get("sound_name"):
+    if plain and not req.get("sound_name") and not no_text:
         raise ClipError("مفيش كلام مفهوم في المقطع ده")
 
     windows: list[tuple[float, float]]
     series = False
-    if plain:                                                # equal parts of <= one minute, in order
+    if no_text:                                              # shared video: whole, up to full_max
+        windows = [(A, min(B, A + full_max))]
+    elif plain:                                              # equal parts of <= one minute, in order
         n = max(1, -(-int(B - A) // hi))
         windows = [(A + (B - A) * k / n, A + (B - A) * (k + 1) / n) for k in range(n)][:max_parts]
         series = len(windows) > 1
@@ -258,7 +263,7 @@ def make_clips(cfg, req: dict) -> list[Path]:
                 "face_x": None, "flags": flags,
                 "transcript": " ".join(w["w"] for w in ws),
                 "sound": req.get("sound_name"),          # made on request from the sounds library
-                "full": full,
+                "full": full or no_text, "no_text": no_text,
             }
             for s in segs:      # segment times relative to the padded clip start
                 d = clip["start"] - pad_a

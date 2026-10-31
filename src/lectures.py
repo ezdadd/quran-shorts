@@ -387,11 +387,11 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
     photo = ROOT / rec["sheikh_photo"] if rec.get("sheikh_photo") else None
     photo = photo if photo and photo.exists() and not geo else None    # the sheikh is on screen already
     title_y = 470 if photo else 120          # the framed photo takes the top of the screen
-    if geo:                                  # screen look: a hook line above the device, own style
+    if geo or rec.get("no_text"):           # shared video: a hook line on top (own style), no subtitles
         hook = " · ".join(x for x in (rec.get("title") or random.Random(rec["id"]).choice(
             (cfg.get("clips") or {}).get("openers") or ["اسمع الكلام ده"]), rec.get("sheikh_name")) if x)
-        ts = rec["screen"].get("title", "plain")
-        labels = [{"text": hook, "y": geo["title_y"], "size": 62 if ts == "plain" else 52,
+        ts = (rec.get("screen") or {}).get("title", "plain")
+        labels = [{"text": hook, "y": geo["title_y"] if geo else 120, "size": 62 if ts == "plain" else 52,
                    **({"box": ts[4:]} if ts.startswith("box_") else {})}]
     else:
         labels = [{"text": rec["title"], "y": title_y, "size": 50}] if rec.get("title") else []
