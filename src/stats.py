@@ -9,7 +9,8 @@ under-counts Reels). Each post is refreshed while it is younger than COLLECT_DAY
 
 Tuning (data/tuning.json, applied on top of config.yaml by util.load_config — config.yaml itself is
 never changed): a theme / reciter / footage category / publishing window whose median views beat
-the overall median gets chosen a little more often, and the reverse. Only groups with at least
+the overall median gets chosen a little more often, and the reverse. For link clips the same is done
+for the screen look — device, framing, camera move, title style — compared among clips only. Only groups with at least
 MIN_SAMPLES videos count, the factor is the square root of the ratio, and it stays in [0.5, 2].
 """
 from __future__ import annotations
@@ -34,6 +35,17 @@ COLLECT_DAYS = 14
 MIN_SAMPLES = 5
 PLATFORM_AR = {"youtube": "يوتيوب", "tiktok": "تيك توك", "instagram": "إنستجرام", "facebook": "فيسبوك"}
 KIND_AR = {"quran": "📖 قرآن", "hadith": "📜 حديث", "kids": "🧒 أطفال", "clip": "🎙 مقاطع"}
+# the link clips' look, as the report shows it
+LOOK_AR = {"style": "الستايل", "device": "الجهاز", "frame": "الكادر", "camera": "الكاميرا",
+           "title_style": "ستايل العنوان", "length": "الطول"}
+VALUE_AR = {"screen": "شاشة", "footage": "مشاهد طبيعة", "phone": "موبايل", "tv": "تلفزيون", "laptop": "لابتوب",
+            "monitor": "شاشة مكتب", "billboard": "لوحة إعلانات", "graphic": "إطار جرافيك", "full": "موبايل كامل",
+            "close": "مربع", "tall": "طولي", "wide": "عريض", "push": "تقريب", "pull": "تبعيد", "drift": "حركة جانبية",
+            "still": "ثابتة", "plain": "عادي", "box_white": "صندوق أبيض", "box_black": "صندوق أسود",
+            "box_gold": "صندوق ذهبي"}
+# screen-look dimensions that tuning adjusts (stats key -> tuning.json key)
+LOOK_TUNING = (("device", "device_weights"), ("frame", "frame_weights"), ("camera", "camera_weights"),
+               ("title_style", "title_weights"))
 
 
 # ---------------------------------------------------------------- records
@@ -55,7 +67,14 @@ def meta(r: dict, cfg) -> dict:
         else "quran"
     cat = r.get("category") or ((r.get("footage") or [{}])[0].get("category") if isinstance(
         (r.get("footage") or [None])[0], dict) else None)
-    return {"kind": kind, "theme": (r.get("reference") or {}).get("theme") or r.get("topic"),
+    scr = r.get("screen") or {}
+    dur = float(r.get("duration") or 0)
+    look = {} if kind != "clip" else {
+        "style": "screen" if r.get("layout") == "screen" else "footage",
+        "device": scr.get("kind") or None, "frame": scr.get("frame"), "camera": scr.get("camera"),
+        "title_style": scr.get("title"),
+        "length": "< 1 د" if dur <= 61 else "1–2 د" if dur <= 120 else "2–3 د"}
+    return {**look, "kind": kind, "theme": (r.get("reference") or {}).get("theme") or r.get("topic"),
             "reciter": (r.get("reciter") or {}).get("id"), "category": cat,
             "hour": first.hour if first else None, "weekday": first.weekday() if first else None,
             "posted": first.isoformat(timespec="minutes") if first else None,
@@ -176,6 +195,19 @@ def tune(cfg, data: dict) -> list[str]:
             if abs(f - 1) >= 0.15:
                 changes.append(f"{'⬆️' if f > 1 else '⬇️'} {k}: ×{f}")
         t[name] = mult
+    clips = {k: e for k, e in sel.items() if e["meta"].get("kind") == "clip"}     # looks: clips vs clips
+    if len(_mature(clips)) >= MIN_SAMPLES * 2:
+        c_overall = statistics.median(_views(e) for e in _mature(clips).values()) or 1.0
+        for key, name in LOOK_TUNING:
+            mult = {}
+            for k, med, cnt in groups(clips, key):
+                if cnt < MIN_SAMPLES:
+                    continue
+                f = round(min(2.0, max(0.5, (med / c_overall) ** 0.5)), 2) if med > 0 else 0.5
+                mult[k] = f
+                if abs(f - 1) >= 0.15:
+                    changes.append(f"{'⬆️' if f > 1 else '⬇️'} {VALUE_AR.get(k, k)}: ×{f}")
+            t[name] = mult
     write_json(TUNING, t)
     return changes
 
@@ -213,11 +245,31 @@ def report(cfg, days: int = 7, do_tune: bool = False) -> str:
             label = (lambda k: KIND_AR.get(k, k)) if key == "kind" else \
                 (lambda k: names.get(k, k)) if key == "reciter" else (lambda k: k)
             lines += [f"  {label(k)}: {int(med):,} ({n} فيديو)" for k, med, n in gs]
+    clips = {k: e for k, e in sel.items() if e["meta"].get("kind") == "clip"}
+    rows = []
+    for key, title in LOOK_AR.items():
+        gs = [g for g in groups(clips, key) if g[2] >= 2][:4]
+        if len(gs) >= 2:                # a comparison needs two sides
+            rows.append(f"  {title}: " + " · ".join(f"{VALUE_AR.get(k, k)} {int(med):,} ({n})" for k, med, n in gs))
+    if rows:
+        lines.append("\n🎬 المقاطع حسب الشكل (متوسط المشاهدات، وعدد الفيديوهات):")
+        lines += rows
+    ds = _dataset_hours()
+    if ds:
+        lines.append(f"\n🎙 بيانات تدريب Whisper: {ds}")
     if do_tune:
         ch = tune(cfg, data)
         lines.append("\n🎯 ضبط تلقائي للاختيارات:" + ("\n" + "\n".join(ch) if ch else
                                                    " مفيش تغيير (محتاج 5 فيديوهات على الأقل لكل مجموعة)."))
     return "\n".join(lines)[:4000]
+
+
+def _dataset_hours() -> str:
+    """Speech training data collected so far (src/dataset.py), when its index is checked out."""
+    from . import dataset
+    if not (dataset.DIR / "index.json").exists():
+        return ""
+    return dataset.summary() + " — التدريب بيبقى منطقي من حوالي 10 ساعات"
 
 
 def main(argv=None):

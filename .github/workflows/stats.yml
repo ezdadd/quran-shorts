@@ -46,6 +46,11 @@ jobs:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
         run: bash tools/state.sh pull
 
+      - name: Training data index (for the hours in the report; read only)
+        env:
+          STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
+        run: bash tools/dataset.sh pull || true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

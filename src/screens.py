@@ -239,8 +239,17 @@ def choose(cfg, rng, clip_portrait: bool, avoid: set[str] = frozenset()) -> dict
     phones = [k for k, v in lib.items() if v["portrait"]]
     wide = [k for k, v in lib.items() if not v["portrait"]]
     use_phone = phones and (not wide or (clip_portrait and rng.random() < float(sc.get("phone_share", 0.7))))
-    sid = rng.choice(phones if use_phone else wide)
+    tun = sc.get("tuning") or {}             # learned from views (src/stats.py), 1 = no change
+    pool = phones if use_phone else wide
+    dw = tun.get("device_weights") or {}
+    sid = rng.choices(pool, [float(dw.get(lib[k].get("kind", ""), 1)) for k in pool])[0]
     looks = {**DEFAULT_LOOKS, **(sc.get("looks") or {})}
+    for dim, key in (("camera", "camera_weights"), ("title", "title_weights")):
+        if tun.get(key):
+            looks[dim] = {k: v * float(tun[key].get(k, 1)) for k, v in looks[dim].items()}
+    for dim in ("frame_portrait", "frame_landscape"):
+        if tun.get("frame_weights"):
+            looks[dim] = {k: v * float(tun["frame_weights"].get(k, 1)) for k, v in looks[dim].items()}
     portrait = lib[sid]["portrait"]
     return {"scene": sid, "kind": lib[sid].get("kind", ""),
             "frame": _w(rng, looks["frame_portrait" if portrait else "frame_landscape"]),

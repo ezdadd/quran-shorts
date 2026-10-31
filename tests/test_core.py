@@ -456,3 +456,29 @@ def test_review_is_one_request_and_skips_used_up_models(tmp_path, monkeypatch):
     gemini._save_usage({"exhausted": {"m1": _t.time() + 3600, "m2": _t.time() + 3600}})
     with pytest.raises(gemini.GeminiError, match="مشغولة"):              # all used up: retry tomorrow path
         gemini.chain(["m1", "m2"])
+
+
+def test_report_and_tuning_compare_clip_looks(tmp_path, monkeypatch):
+    """Link clips are compared by their look (device, framing, camera, title style); a look that
+    does better gets picked more often — among clips only, never mixed with Quran videos."""
+    from src import screens, stats
+    monkeypatch.setattr(stats, "TUNING", tmp_path / "tuning.json")
+    old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(timespec="minutes")
+    data = {}
+    for i in range(12):
+        dev = "phone" if i % 2 else "tv"
+        data[f"c-{i}"] = {"meta": {"kind": "clip", "style": "screen", "device": dev, "frame": "close",
+                                   "camera": "push", "title_style": "plain", "length": "< 1 د", "posted": old},
+                          "platforms": {"tiktok": {"views": 900 if dev == "phone" else 100}}}
+    data["q-1"] = {"meta": {"kind": "quran", "posted": old}, "platforms": {"tiktok": {"views": 50}}}
+    monkeypatch.setattr(stats, "read_json", lambda p, d: data if p == stats.PATH else d)
+    text = stats.report({"reciters": {}}, 7)
+    assert "🎬" in text and "موبايل" in text and "تلفزيون" in text
+    stats.tune({}, data)
+    t = json.loads((tmp_path / "tuning.json").read_text(encoding="utf-8"))
+    assert t["device_weights"]["phone"] > 1 > t["device_weights"]["tv"]
+    lib = {"p": {"portrait": False, "kind": "phone"}, "t": {"portrait": False, "kind": "tv"}}
+    monkeypatch.setattr(screens, "library", lambda: lib)
+    cfg = {"screens": {"tuning": {"device_weights": t["device_weights"]}}}
+    picks = [screens.choose(cfg, random.Random(i), clip_portrait=False)["scene"] for i in range(400)]
+    assert picks.count("p") > picks.count("t")      # the better device is chosen more often

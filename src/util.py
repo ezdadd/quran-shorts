@@ -62,6 +62,9 @@ def _apply_tuning(cfg: dict) -> None:
         r = (cfg.get("reciters") or {}).get(k)
         if r and float(r.get("weight", 1)) > 0:        # a disabled reciter stays disabled
             r["weight"] = float(r.get("weight", 1)) * float(m)
+    # screen look of link clips: src/screens.choose multiplies its weights by these
+    cfg.setdefault("screens", {})["tuning"] = {k: t.get(k) or {} for k in
+                                               ("device_weights", "frame_weights", "camera_weights", "title_weights")}
     ww = t.get("window_weights") or {}
     for key in ("windows", "friday_windows"):
         out = []
