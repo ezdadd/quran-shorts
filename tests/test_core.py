@@ -427,3 +427,32 @@ def test_paid_gemini_first_then_free_automatically(tmp_path, monkeypatch):
     for _ in range(5):
         gemini._count_paid()
     assert gemini.chain(models) == ["flash"]                    # today's paid cap reached
+
+
+def test_review_is_one_request_and_skips_used_up_models(tmp_path, monkeypatch):
+    """Free tier = ~20 requests a day per model: a review costs ONE request (the second listening is
+    done locally), and a model whose daily quota is gone isn't asked again until it resets."""
+    import time as _t
+    from src.agent import corrector, gemini
+    monkeypatch.setattr(gemini, "USAGE", tmp_path / "usage.json")
+    monkeypatch.setattr(gemini, "available", lambda paid=False: {"m1", "m2"})
+    r = {"id": "c-1", "title": "", "sheikh_name": "", "segments": [
+        {"type": "speech", "start": 0.0, "end": 2.0, "words": [{"w": "قال", "p": 0.9}, {"w": "الشيح", "p": 0.3}]}]}
+    c = corrector.Corrector({"agent": {"gemini_models": ["m1", "m2"], "mode": "single"}}, r, tmp_path / "a.wav")
+    monkeypatch.setattr(c, "relisten", lambda k, ctx, slow: json.dumps({"text": "قال الشيخ", "words": []}))
+    monkeypatch.setattr(c, "quran_search", lambda text: "No Quran match.")
+    calls = []
+
+    def post(model, body, timeout):
+        calls.append(model)
+        assert "قال الشيخ" in body["contents"][0]["parts"][0]["text"]     # the second hearing is in the prompt
+        return {"candidates": [{"content": {"parts": [{"text": json.dumps(
+            {"edits": [], "locked": [], "confidence": "high", "summary_ar": "تمام"})}]}}]}
+
+    monkeypatch.setattr(gemini, "_post", post)
+    assert c.ask()["confidence"] == "high" and calls == ["m1"]          # one request, no tool turns
+    gemini._save_usage({"exhausted": {"m1": _t.time() + 3600}})
+    assert gemini.chain(["m1", "m2"]) == ["m2"]                         # used-up model skipped
+    gemini._save_usage({"exhausted": {"m1": _t.time() + 3600, "m2": _t.time() + 3600}})
+    with pytest.raises(gemini.GeminiError, match="مشغولة"):              # all used up: retry tomorrow path
+        gemini.chain(["m1", "m2"])

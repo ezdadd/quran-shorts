@@ -119,6 +119,15 @@ RESULT_SCHEMA = {
     "additionalProperties": False,
 }
 
+# one-request mode: the second listening and Quran search are already in the prompt
+SINGLE_SYSTEM = SYSTEM.replace(
+    """5. When a line has low-confidence words or does not make sense, call relisten on it before deciding.
+   Give a short Arabic context_prompt (the previous line plus the topic); use slow=true for fast speech.
+   Do not relisten lines that are already clear.""",
+    """5. Lines with low-confidence words were already listened to a second time; that second hearing is
+   given below the lines. Use it (and the "ممكن يكون آية" Quran matches) to decide — there are no tools.""").replace(
+    "Use quran_search when a line might be a Quran quote.", "Quran matches found by search are listed below the lines.")
+
 LEVEL = {"low": 0, "medium": 1, "high": 2}
 
 
@@ -193,6 +202,50 @@ class Corrector:
             log.warning("tool %s failed: %s", name, e)
             return f"Error: {e}"
 
+    # ---------------------------------------------------------------- one request (agent.mode: single)
+    def prelisten(self) -> dict[int, dict]:
+        """The second listening, done here with our own Whisper (free) before asking the model: every
+        line with unsure words, primed with the line before it. The model then needs ONE request
+        instead of a tool turn per line — the free tier counts requests, ~20 a day per model."""
+        out: dict[int, dict] = {}
+        budget = int(self.a.get("max_relisten", 12))
+        for k, s in enumerate(self.segs, 1):
+            if len(out) >= budget:
+                break
+            if not any(w.get("p") is not None and w["p"] < 0.6 for w in s.get("words") or []):
+                continue
+            prev = self.segs[k - 2] if k > 1 else None
+            ctx = ((prev.get("text") or " ".join(w["w"] for w in prev.get("words") or [])) if prev
+                   else (self.r.get("title") or ""))[-200:]
+            try:
+                out[k] = json.loads(self.relisten(k, ctx, len(s.get("words") or []) / max(0.5, s["end"] - s["start"]) > 3.2))
+            except Exception as e:      # one line failing to re-listen doesn't stop the review
+                log.warning("prelisten line %d: %s", k, e)
+        return out
+
+    def quran_hints(self) -> dict[int, str]:
+        """Lines that may quote the Quran (spelling-insensitive search), with the verified text."""
+        out = {}
+        for k, s in enumerate(self.segs, 1):
+            words = s.get("words") or [{"w": w} for w in (s.get("text") or "").split()]
+            res = self.quran_search(" ".join(w["w"] for w in words))
+            if not res.startswith("No"):
+                out[k] = res
+        return out
+
+    def single_prompt(self) -> str:
+        heard, quran = self.prelisten(), self.quran_hints()
+        extra = []
+        for k in sorted(set(heard) | set(quran)):
+            if k in heard:
+                h = heard[k]
+                low = [w["w"] for w in h.get("words") or [] if w.get("p", 1) < 0.6]
+                extra.append(f"{k}) سماع تاني: {h.get('text', '')}" + (f"   (لسه مش أكيدة: {'، '.join(low)})" if low else ""))
+            if k in quran:
+                extra.append(f"{k}) ممكن يكون آية: {quran[k]}")
+        return self.user_prompt() + ("\n\nسماع تاني بالـ Whisper للسطور اللي فيها كلمات مش أكيدة، وأي سطر ممكن يكون "
+                                     "قرآن (مفيش أدوات تانية — قرر من ده):\n" + "\n".join(extra) if extra else "")
+
     # ---------------------------------------------------------------- loop
     def user_prompt(self) -> str:
         from . import memory
@@ -207,6 +260,16 @@ class Corrector:
     def ask(self) -> dict:
         if self.a.get("provider", "gemini") == "gemini":
             from . import gemini
+            models = list(self.a.get("gemini_models") or ["gemini-3.5-flash"])
+            if self.a.get("mode", "single") == "single":
+                try:
+                    return gemini.ask_json(SINGLE_SYSTEM, self.single_prompt(), RESULT_SCHEMA, models,
+                                           int(self.a.get("gemini_timeout", 90)), str(self.a.get("thinking", "low")),
+                                           int(self.a.get("paid_daily_max", 150)))
+                except gemini.GeminiError as e:
+                    if "مشغولة" in str(e):      # out of quota: the loop would fail the same way
+                        raise AgentError(str(e)) from e
+                    log.warning("one-request review failed (%s) — falling back to the agent loop", e)
             try:
                 return gemini.run(SYSTEM, self.user_prompt(), TOOLS, RESULT_SCHEMA, self._run_tool,
                                   list(self.a.get("gemini_models") or ["gemini-3.5-flash"]),

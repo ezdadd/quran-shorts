@@ -61,18 +61,49 @@ USAGE = Path(__file__).resolve().parents[2] / "data" / "gemini_usage.json"
 PAID_DAILY_MAX = 150
 
 
-def _paid_used() -> int:
+def _usage() -> dict:
     try:
-        u = json.loads(USAGE.read_text(encoding="utf-8"))
+        return json.loads(USAGE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return 0
+        return {}
+
+
+def _save_usage(u: dict) -> None:
+    USAGE.parent.mkdir(parents=True, exist_ok=True)
+    USAGE.write_text(json.dumps(u), encoding="utf-8")
+
+
+def _paid_used() -> int:
+    u = _usage()
     return int(u.get("paid", 0)) if u.get("date") == time.strftime("%Y-%m-%d", time.gmtime()) else 0
 
 
 def _count_paid() -> None:
-    n = _paid_used() + 1
-    USAGE.parent.mkdir(parents=True, exist_ok=True)
-    USAGE.write_text(json.dumps({"date": time.strftime("%Y-%m-%d", time.gmtime()), "paid": n}), encoding="utf-8")
+    u = _usage()
+    u.update(paid=_paid_used() + 1, date=time.strftime("%Y-%m-%d", time.gmtime()))
+    _save_usage(u)
+
+
+def exhausted() -> set[str]:
+    """Models whose free DAILY quota is used up (Google said so) — not tried again until it resets."""
+    now = time.time()
+    return {m for m, until in (_usage().get("exhausted") or {}).items() if until > now}
+
+
+def _mark_exhausted(model: str, r: requests.Response) -> bool:
+    """A 429 for the per-day quota (not the per-minute one): remember until Google's retry time."""
+    try:
+        details = r.json().get("error", {}).get("details", [])
+    except ValueError:
+        return False
+    if not any("PerDay" in (v.get("quotaId") or "") for d in details for v in d.get("violations", [])):
+        return False
+    delay = next((d["retryDelay"] for d in details if "retryDelay" in d), "3600s")
+    u = _usage()
+    u.setdefault("exhausted", {})[model] = time.time() + float(str(delay).rstrip("s") or 3600)
+    _save_usage(u)
+    log.info("%s: free daily quota used up — skipped until it resets", model)
+    return True
 
 
 class Busy(Exception):
@@ -99,10 +130,13 @@ def chain(models: list[str]) -> list[str]:
                 paid_names = available(paid=True)
             except requests.RequestException as e:
                 log.warning("paid Gemini key unusable (%s) — free models only", e)
-    out = [m for m in models if (_split(m)[0] in paid_names if _split(m)[1] else m in names)]
+    used_up = exhausted()
+    out = [m for m in models if m not in used_up and (_split(m)[0] in paid_names if _split(m)[1] else m in names)]
+    if not out and any(m in used_up for m in models):
+        raise GeminiError("كل موديلات Gemini مشغولة دلوقتي (الحصة المجانية اليومية خلصت) — هيتجرب تاني بعدين")
     if not out:
-        out = sorted((n for n in names if "flash" in n and not any(x in n for x in ("lite", "image", "tts", "live",
-                                                                                   "omni", "preview"))),
+        out = sorted((n for n in names if "flash" in n and n not in used_up and
+                      not any(x in n for x in ("lite", "image", "tts", "live", "omni", "preview"))),
                      reverse=True)[:3]
         log.info("configured models unavailable, using %s", out)
     if not out:
@@ -128,6 +162,8 @@ def _post(model: str, body: dict, timeout: int) -> dict:
                               headers={"x-goog-api-key": _key(paid), "Content-Type": "application/json"})
         except requests.Timeout:
             raise Busy(f"{model}: no answer in {timeout}s")
+        if r.status_code == 429 and _mark_exhausted(model, r):
+            raise Busy(f"{model}: daily quota used up")      # no point waiting 10 s and asking again
         if r.status_code == 429 or r.status_code >= 500:     # free-tier rate limit / overloaded
             if attempt == 0:
                 log.warning("gemini %s on %s, retrying once in 10s", r.status_code, model)
@@ -180,6 +216,43 @@ def _loop(model: str, body: dict, user: str, call_tool, max_turns: int, timeout:
             parts.append({"functionResponse": fr})
         contents.append({"role": "user", "parts": parts})
     raise GeminiError("الوكيل خد لفات كتير من غير ما يخلص")
+
+
+def ask_json(system: str, user: str, result_schema: dict, models: list[str], timeout: int = 90,
+             thinking: str = "low", paid_daily_max: int | None = None) -> dict:
+    """ONE request: the answer as JSON matching result_schema (no tools, no back-and-forth).
+    A busy / out-of-quota model hands over to the next one in the chain."""
+    global PAID_DAILY_MAX
+    if paid_daily_max is not None:
+        PAID_DAILY_MAX = paid_daily_max
+    try:
+        order = chain(models)
+    except requests.RequestException as e:
+        raise GeminiError(f"مش قادر أوصل لـ Gemini: {e}") from e
+    busy = []
+    for model in order:
+        body = {"systemInstruction": {"parts": [{"text": system}]},
+                "contents": [{"role": "user", "parts": [{"text": user}]}],
+                "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json",
+                                     "responseSchema": _schema(result_schema),
+                                     "thinkingConfig": _thinking(_split(model)[0], thinking)}}
+        t0 = time.time()
+        try:
+            resp = _post(model, body, timeout)
+        except Busy as e:
+            log.warning("switching model: %s", e)
+            busy.append(str(e))
+            continue
+        try:
+            text = "".join(p.get("text", "") for p in resp["candidates"][0]["content"]["parts"])
+            out = json.loads(text)
+        except (KeyError, IndexError, ValueError) as e:
+            raise GeminiError(f"{model}: رد مش مفهوم ({e})") from e
+        u = resp.get("usageMetadata") or {}
+        log.info("gemini one-shot (%s, %.0fs): in=%s out=%s", model, time.time() - t0,
+                 u.get("promptTokenCount"), u.get("candidatesTokenCount"))
+        return out
+    raise GeminiError("كل موديلات Gemini مشغولة دلوقتي (" + "؛ ".join(busy) + ") — هيتجرب تاني بعدين")
 
 
 def run(system: str, user: str, tools: list[dict], result_schema: dict, call_tool, models: list[str],

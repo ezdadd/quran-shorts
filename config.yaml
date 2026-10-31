@@ -361,6 +361,7 @@ agent:
   gemini_models: [gemini-3.1-pro-preview@paid, gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash-preview,
                   gemini-3.8-flash, gemini-3.7-flash, gemini-flash-latest, gemini-3.5-flash@paid]
   paid_daily_max: 150        # أقصى عدد طلبات مدفوعة في اليوم (حماية للمصاريف)، بعده مجاني بس
+  mode: single               # single = طلب واحد للمقطع (السماع التاني بيتعمل عندنا ببلاش)؛ loop = الطريقة القديمة
   thinking: medium           # low / medium / high — متوسط: تدقيق أعمق في السطور الصعبة
   max_per_poll: 1            # مقطع واحد في كل مرة (والتاني بعد 15 دقيقة على الأقل): حد الطلبات المجاني
   gemini_timeout: 150        # ثواني لكل رد قبل ما يعتبر الموديل مشغول
