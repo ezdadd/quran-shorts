@@ -400,3 +400,30 @@ def test_video_probe_reads_codecs_opencv_cannot(tmp_path):
     a = tmp_path / "a.m4a"
     subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "sine=d=1", str(a)], check=True)
     assert video_size(a) is None
+
+
+def test_paid_gemini_first_then_free_automatically(tmp_path, monkeypatch):
+    """Pro on the paid key first; no paid key, a busy / out-of-quota paid model, or today's paid cap
+    reached -> the free models carry on by themselves."""
+    from src.agent import gemini
+    monkeypatch.setattr(gemini, "USAGE", tmp_path / "usage.json")
+    monkeypatch.setattr(gemini, "available", lambda paid=False: {"pro", "flash"})
+    models = ["pro@paid", "flash", "flash@paid"]
+    monkeypatch.delenv("GEMINI_API_KEY_PAID", raising=False)
+    assert gemini.chain(models) == ["flash"]                    # no paid key: free only
+    monkeypatch.setenv("GEMINI_API_KEY_PAID", "k")
+    assert gemini.chain(models) == ["pro@paid", "flash", "flash@paid"]
+    tried = []
+
+    def loop(model, *a, **k):
+        tried.append(model)
+        if model.endswith("@paid"):
+            raise gemini.Busy(f"{model}: HTTP 429")             # paid quota / rate limit hit
+        return {"ok": model}
+
+    monkeypatch.setattr(gemini, "_loop", loop)
+    out = gemini.run("s", "u", [], {"type": "object", "properties": {}}, None, models, paid_daily_max=5)
+    assert out == {"ok": "flash"} and tried == ["pro@paid", "flash"]
+    for _ in range(5):
+        gemini._count_paid()
+    assert gemini.chain(models) == ["flash"]                    # today's paid cap reached

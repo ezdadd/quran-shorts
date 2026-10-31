@@ -211,7 +211,7 @@ class Corrector:
                 return gemini.run(SYSTEM, self.user_prompt(), TOOLS, RESULT_SCHEMA, self._run_tool,
                                   list(self.a.get("gemini_models") or ["gemini-3.5-flash"]),
                                   int(self.a.get("max_turns", 16)), int(self.a.get("gemini_timeout", 90)),
-                                  str(self.a.get("thinking", "low")))
+                                  str(self.a.get("thinking", "low")), int(self.a.get("paid_daily_max", 150)))
             except gemini.GeminiError as e:
                 raise AgentError(str(e)) from e
         return self._ask_claude()

@@ -13,7 +13,7 @@ REPO="${STATE_REPO:-${GITHUB_REPOSITORY%%/*}/quran-shorts-data}"
 DIR=_state
 DIRS="queue output data/corrections data/sheikhs"
 FILES="data/history.json data/reviews.json data/telegram_state.json data/sources.json data/sources_seen.json
-       data/stats.json data/tuning.json data/sounds.json data/footage_checks.json"
+       data/stats.json data/tuning.json data/sounds.json data/footage_checks.json data/gemini_usage.json"
 # rendered media is never kept (as in .gitignore)
 EXCL=(--exclude '*.mp4' --exclude '*.wav' --exclude '*.tmp' --exclude 'visual_test/' --exclude '_*')
 

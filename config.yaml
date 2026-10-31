@@ -356,8 +356,11 @@ agent:
   # flash-lite اتشال: في التجربة وافق على مقطع فيه آية متسمعة غلط. لو كلهم مشغولين المقطع بيستنى ويتجرب بعدين
   # كل موديل ليه حصة يومية مجانية لوحده: كل ما السلسلة أطول، المصحح نادرًا ما يفشل
   # (Pro و 4 Argon محتاجين تفعيل الدفع على مفتاح الـ API — اشتراك تطبيق Gemini مش بيشملهم)
-  gemini_models: [gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash-preview, gemini-3.8-flash,
-                  gemini-3.7-flash, gemini-flash-latest]
+  # "@paid" = بالمفتاح المدفوع (GEMINI_API_KEY_PAID). لو مش موجود، أو مشغول، أو خلص حد النهارده،
+  # المصحح بيكمل تلقائي بالموديلات المجانية اللي بعده
+  gemini_models: [gemini-3.1-pro-preview@paid, gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash-preview,
+                  gemini-3.8-flash, gemini-3.7-flash, gemini-flash-latest, gemini-3.5-flash@paid]
+  paid_daily_max: 150        # أقصى عدد طلبات مدفوعة في اليوم (حماية للمصاريف)، بعده مجاني بس
   thinking: medium           # low / medium / high — متوسط: تدقيق أعمق في السطور الصعبة
   max_per_poll: 1            # مقطع واحد في كل مرة (والتاني بعد 15 دقيقة على الأقل): حد الطلبات المجاني
   gemini_timeout: 150        # ثواني لكل رد قبل ما يعتبر الموديل مشغول

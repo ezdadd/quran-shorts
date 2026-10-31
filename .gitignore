@@ -33,5 +33,6 @@ data/stats.json
 data/tuning.json
 data/sounds.json
 data/footage_checks.json
+data/gemini_usage.json
 data/corrections/
 data/sheikhs/
