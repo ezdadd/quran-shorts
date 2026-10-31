@@ -69,9 +69,10 @@ def chain(models: list[str]) -> list[str]:
     return out
 
 
-def _thinking(model: str) -> dict:
-    # keep thinking short: the task is proofreading, and long thinking made the free tier time out
-    return {"thinkingBudget": 1024} if model.startswith("gemini-2.") else {"thinkingLevel": "low"}
+def _thinking(model: str, level: str = "low") -> dict:
+    # agent.thinking in config.yaml (low / medium / high); medium checks hard lines more carefully
+    budget = {"low": 1024, "medium": 4096, "high": 8192}.get(level, 1024)
+    return {"thinkingBudget": budget} if model.startswith("gemini-2.") else {"thinkingLevel": level}
 
 
 def _post(model: str, body: dict, timeout: int) -> dict:
@@ -95,8 +96,9 @@ def _post(model: str, body: dict, timeout: int) -> dict:
     raise Busy(model)
 
 
-def _loop(model: str, body: dict, user: str, call_tool, max_turns: int, timeout: int) -> dict:
-    body = {**body, "generationConfig": {**body["generationConfig"], "thinkingConfig": _thinking(model)}}
+def _loop(model: str, body: dict, user: str, call_tool, max_turns: int, timeout: int,
+          thinking: str = "low") -> dict:
+    body = {**body, "generationConfig": {**body["generationConfig"], "thinkingConfig": _thinking(model, thinking)}}
     contents = [{"role": "user", "parts": [{"text": user}]}]
     for turn in range(max_turns):
         t0 = time.time()
@@ -135,7 +137,7 @@ def _loop(model: str, body: dict, user: str, call_tool, max_turns: int, timeout:
 
 
 def run(system: str, user: str, tools: list[dict], result_schema: dict, call_tool, models: list[str],
-        max_turns: int = 16, timeout: int = 90) -> dict:
+        max_turns: int = 16, timeout: int = 90, thinking: str = "low") -> dict:
     """Agent loop over a chain of models: a busy / slow / retired model hands over to the next one
     (from the start of the conversation — thought signatures belong to one model).
     call_tool(name, args) -> str. Returns submit_result's arguments."""
@@ -155,7 +157,7 @@ def run(system: str, user: str, tools: list[dict], result_schema: dict, call_too
     busy = []
     for model in order:
         try:
-            return _loop(model, body, user, call_tool, max_turns, timeout)
+            return _loop(model, body, user, call_tool, max_turns, timeout, thinking)
         except Busy as e:
             log.warning("switching model: %s", e)
             busy.append(str(e))
