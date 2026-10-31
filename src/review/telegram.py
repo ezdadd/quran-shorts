@@ -546,7 +546,7 @@ def send(cfg) -> int:
                 continue
             try:
                 from ..publish.runner import video_file
-                mp4 = video_file(p, r)          # local, or fetched back from hosting
+                mp4 = review_copy(video_file(p, r))     # local, or fetched back from hosting
             except Exception as e:
                 log.warning("%s: cannot send (%s)", r["id"], e)
                 continue
@@ -567,11 +567,29 @@ def send(cfg) -> int:
     return sent
 
 
+TG_MAX = 48 * 1024 * 1024     # bots can upload up to 50 MB
+
+
+def review_copy(mp4: Path) -> Path:
+    """The file to send for review: the video itself, or (a long shared clip over the bot's 50 MB
+    limit) a lighter 720p copy just for watching — the full-quality file is what gets published."""
+    if mp4.stat().st_size <= TG_MAX:
+        return mp4
+    from ..util import media_duration, run_ffmpeg
+    out = mp4.with_name(mp4.stem + "_review.mp4")
+    kbps = int(TG_MAX * 8 / 1000 / max(1.0, media_duration(mp4)) * 0.85) - 96
+    run_ffmpeg(["-y", "-i", str(mp4), "-vf", "scale=720:1280", "-c:v", "libx264", "-preset", "veryfast",
+                "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k",
+                "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)], "review copy")
+    log.info("%s is %.0f MB: sending a %d kb/s copy for review", mp4.name, mp4.stat().st_size / 2 ** 20, kbps)
+    return out
+
+
 def send_one(cfg, path: Path) -> None:
     """Post one record (clip / queue item) for review right away."""
     r = read_json(path, {})
     from ..publish.runner import video_file
-    mp4 = video_file(path, r)
+    mp4 = review_copy(video_file(path, r))
     with open(mp4, "rb") as f:
         msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
                   chat_id=owner(), caption=_caption(r, store.load()), supports_streaming="true",
