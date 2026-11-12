@@ -152,6 +152,7 @@ def collect(cfg) -> int:
                 e.setdefault("platforms", {})[pl] = m | {"at": now.isoformat(timespec="minutes")} | \
                     ({"reads": reads} if reads else {})
                 n += 1
+        write_json(PATH, data)          # as it goes: a run cut short still keeps what it read
     write_json(PATH, data)
     log.info("collected %d post stats", n)
     return n

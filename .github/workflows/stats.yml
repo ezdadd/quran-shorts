@@ -23,7 +23,7 @@ concurrency:
 jobs:
   stats:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       PYTHONIOENCODING: utf-8
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
@@ -60,7 +60,10 @@ jobs:
       - name: Python packages (light)
         run: pip install requests pyyaml python-dotenv tenacity tzdata
 
+      # its own limit, so a slow collection never takes the health check and the save down with it
+      # (Buffer retries made every run hit the job's limit for a week: nothing saved, no daily check)
       - name: Collect, and on Saturdays report + tune
+        timeout-minutes: 12
         run: |
           if [ "${{ inputs.report }}" = "true" ] || [ "$(TZ=Africa/Cairo date +%u)" = "6" ]; then
             python -m src.stats --collect --report --tune
@@ -73,6 +76,7 @@ jobs:
         run: python -m src.health --check || true
 
       - name: Save
+        if: always()
         env:
           STATE_TOKEN: ${{ secrets.STATE_TOKEN }}
         run: |
