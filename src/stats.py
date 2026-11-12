@@ -5,7 +5,9 @@
 
 Numbers: Buffer gives views / reactions / comments / shares / watch time for YouTube, TikTok and
 Instagram. Facebook gives Reels plays only with the read_insights permission (else 'views', which
-under-counts Reels). Each post is refreshed while it is younger than COLLECT_DAYS.
+under-counts Reels). A Facebook post is refreshed daily while it is younger than COLLECT_DAYS; a
+Buffer post only at BUFFER_READS_AT days (Buffer allows 3,000 requests a month for everything, and
+reading ~30 posts a day for two weeks used it all up), and only from what scheduling leaves spare.
 
 Tuning (data/tuning.json, applied on top of config.yaml by util.load_config — config.yaml itself is
 never changed): a theme / reciter / footage category / publishing window whose median views beat
@@ -32,6 +34,7 @@ log = logging.getLogger("quran-shorts.stats")
 PATH = ROOT / "data" / "stats.json"
 TUNING = ROOT / "data" / "tuning.json"
 COLLECT_DAYS = 14
+BUFFER_READS_AT = (3, 10)   # days after posting
 MIN_SAMPLES = 5
 PLATFORM_AR = {"youtube": "يوتيوب", "tiktok": "تيك توك", "instagram": "إنستجرام", "facebook": "فيسبوك"}
 KIND_AR = {"quran": "📖 قرآن", "hadith": "📜 حديث", "kids": "🧒 أطفال", "clip": "🎙 مقاطع"}
@@ -133,6 +136,12 @@ def collect(cfg) -> int:
             due = datetime.fromisoformat(info["due"]) if info.get("due") else None
             if not due or due > now or now - due > timedelta(days=COLLECT_DAYS):
                 continue
+            reads = 0
+            if pl != "facebook" and info.get("post_id"):
+                from .publish import buffer
+                reads = sum(now - due >= timedelta(days=d) for d in BUFFER_READS_AT)
+                if reads <= ((e.get("platforms") or {}).get(pl) or {}).get("reads", 0) or not buffer.spare():
+                    continue
             try:
                 m = _facebook_metrics(cfg, info["video_id"]) if pl == "facebook" and info.get("video_id") else \
                     _buffer_metrics(info["post_id"]) if info.get("post_id") else None
@@ -140,7 +149,8 @@ def collect(cfg) -> int:
                 log.warning("%s %s: %s", r["id"], pl, ex)
                 continue
             if m is not None:
-                e.setdefault("platforms", {})[pl] = m | {"at": now.isoformat(timespec="minutes")}
+                e.setdefault("platforms", {})[pl] = m | {"at": now.isoformat(timespec="minutes")} | \
+                    ({"reads": reads} if reads else {})
                 n += 1
     write_json(PATH, data)
     log.info("collected %d post stats", n)

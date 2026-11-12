@@ -34,6 +34,7 @@ def _ok_to_publish(r: dict, reviews: dict | None = None) -> bool:
 
 
 BACKLOG_DAYS = 14
+STATUS_EVERY = 6        # hours between two Buffer status checks of the same post
 
 
 def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
@@ -331,11 +332,17 @@ def cleanup(cfg) -> None:
                 continue
             if datetime.fromisoformat(info["due"]) > now:
                 continue
+            # Buffer requests are few (buffer.py): a post is asked about once it is due, then every
+            # STATUS_EVERY hours at most, and only from what scheduling posts leaves spare
+            if info.get("checked") and datetime.fromisoformat(info["checked"]) + \
+                    timedelta(hours=STATUS_EVERY) > now or not buffer.spare():
+                continue
             try:
                 st = buffer.post_status(info["post_id"])
             except Exception as e:
                 log.warning("status check %s %s: %s", r["id"], pl, e)
                 continue
+            info["checked"] = now.isoformat(timespec="minutes")
             info["status"] = st["status"]
             info["link"] = st.get("externalLink")
             if st["status"] == "error":
@@ -347,8 +354,10 @@ def cleanup(cfg) -> None:
             # Free the space as soon as every Buffer post is confirmed sent (a failed one is kept a day
             # in case it is retried); a Facebook-only video right after its time.
             buf = [i for pl, i in pub.items() if pl != "facebook"]
+            # (or, its status never confirmed, 3 days after its time: Buffer fetched the file long ago)
             done = all(i.get("status") == "sent" or
-                       (i.get("status") == "error" and datetime.fromisoformat(i["due"]) + timedelta(hours=24) < now)
+                       (i.get("status") == "error" and datetime.fromisoformat(i["due"]) + timedelta(hours=24) < now) or
+                       bool(i.get("due")) and datetime.fromisoformat(i["due"]) + timedelta(days=3) < now
                        for i in buf)
             last_due = max((datetime.fromisoformat(i["due"]) for i in pub.values() if i.get("due")), default=None)
             if done and last_due and last_due + timedelta(hours=hours) < now:

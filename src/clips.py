@@ -548,6 +548,9 @@ def main(argv=None):
             raise SystemExit(1)         # told you already: no second "job failed" alert
     except ClipError as e:
         log.error("%s", e)
+        if req.get("msg_id"):                   # you're told below: the poller must not make it again
+            write_json(ROOT / "output" / "failed" / f"{req['id']}.json",
+                       {"id": req["id"], "error": str(e)[:300], "at": datetime.now(timezone.utc).isoformat()})
         if chat:
             head = "⚠️ المقطع ده متعملش" if not (req.get("autofix") or req.get("edit") or req.get("photo")) \
                 else f"⚠️ {req.get('autofix') or req.get('edit') or req.get('photo')}"

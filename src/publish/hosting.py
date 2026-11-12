@@ -43,9 +43,32 @@ def configured() -> bool:
         return False
 
 
-@retry(wait=wait_exponential(min=3, max=40), stop=stop_after_attempt(4), reraise=True)
+MAX_BYTES = 95 * 1000 * 1000      # free plan: 100 MB per video (bigger ones get a 413)
+
+
+def fit(path: Path) -> Path:
+    """The file itself, or (a long shared clip at full quality can pass 100 MB) a copy re-encoded
+    at the bit rate that fits, picture size and sound unchanged."""
+    if path.stat().st_size <= MAX_BYTES:
+        return path
+    from ..util import media_duration, run_ffmpeg
+    out = path.with_name(path.stem + "_host.mp4")
+    kbps = int(MAX_BYTES * 8 / 1000 / max(1.0, media_duration(path)) * 0.9) - 192
+    run_ffmpeg(["-y", "-i", str(path), "-c:v", "libx264", "-preset", "veryfast", "-b:v", f"{kbps}k",
+                "-maxrate", f"{kbps}k", "-bufsize", f"{kbps * 2}k", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)], "fit for hosting")
+    log.info("%s is %.0f MB: hosting a %d kb/s copy (%.0f MB)", path.name, path.stat().st_size / 1e6, kbps,
+             out.stat().st_size / 1e6)
+    return out
+
+
 def upload(path: Path, public_id: str) -> dict:
     """Upload an MP4; returns {"url", "public_id", "bytes"}. Re-uploading the same id overwrites."""
+    return _upload(fit(path), public_id)
+
+
+@retry(wait=wait_exponential(min=3, max=40), stop=stop_after_attempt(4), reraise=True)
+def _upload(path: Path, public_id: str) -> dict:
     cloud, auth = _creds()
     with open(path, "rb") as f:
         r = requests.post(f"https://api.cloudinary.com/v1_1/{cloud}/video/upload", auth=auth,

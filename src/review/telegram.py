@@ -717,6 +717,41 @@ def agent_due(cfg, reviews: dict, state: dict) -> list[dict]:
     return out
 
 
+LOST_AFTER = timedelta(minutes=110)    # a shared video takes ~10 min, a long one on a screen ~25
+
+
+def _made(sid: str) -> bool:
+    """A record exists for shared video `sid`: sent for review, queued, published, or failed with a
+    message to you (output/failed)."""
+    pats = (f"c-*-{sid}.json", f"c-*-{sid}-p*.json")
+    return (ROOT / "output" / "failed" / f"{sid}.json").exists() or any(
+        next(d.glob(p), None) for d in (ROOT / "queue", ROOT / "output" / "review", *(ROOT / "output").glob("2*"))
+        for p in pats)
+
+
+def lost_shares(state: dict) -> list[dict]:
+    """Videos you shared whose job died with nothing to show (the GitHub machine was shut down, or
+    a crash before any message): made again once; if that dies too, you're told."""
+    now = datetime.now(timezone.utc)
+    out = []
+    for s in state.get("shared") or []:
+        if not s.get("req") or s.get("gave_up"):
+            continue
+        at = datetime.fromisoformat(s.get("retried") or s["at"])
+        if not LOST_AFTER < now - at < timedelta(days=2) or _made(s["id"]):
+            continue
+        if s.get("retried"):
+            s["gave_up"] = True
+            api("sendMessage", chat_id=owner(), reply_to_message_id=s["req"]["msg_id"],
+                allow_sending_without_reply="true",
+                text="⚠️ الفيديو ده متعملش مرتين ورا بعض (الجهاز اللي بيعمله وقف في النص). ابعته تاني أو ابعت جزء أقصر.")
+            continue
+        s["retried"] = now.isoformat(timespec="seconds")
+        out.append(s["req"])
+        log.info("shared video %s left nothing behind: making it again", s["id"])
+    return out
+
+
 def _running_jobs() -> dict[str, int]:
     """Clip / daily jobs queued or running on GitHub right now (videos being made)."""
     repo, tok = os.environ.get("GITHUB_REPOSITORY"), os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
@@ -1055,7 +1090,7 @@ def poll(cfg) -> bool:
                 clip_requests.append(req)
                 state.setdefault("shared", []).append({"id": req["id"], "at": datetime.now(timezone.utc)
                                                        .isoformat(timespec="seconds"),
-                                                       "url": req.get("url"), "file": bool(media)})
+                                                       "url": req.get("url"), "file": bool(media), "req": req})
                 if req.get("start") is not None:
                     a, b = int(req["start"]), int(req["end"])
                     when = f" من {a // 60}:{a % 60:02d} لـ {b // 60}:{b % 60:02d}"
@@ -1135,6 +1170,7 @@ def poll(cfg) -> bool:
                     api("sendMessage", chat_id=me,
                         text="⚠️ الفيديو ده اتجدول خلاص بالهاشتاجات القديمة — التعديل هيطبق على المنصات اللي لسه متجدولتش بس.")
     clip_requests += agent_due(cfg, reviews, state)
+    clip_requests += lost_shares(state)
     rerun = quran_auto(cfg, reviews, today) or rerun
     rerun = fixed_auto(cfg, reviews) or rerun
     rerun = plain_auto(cfg, reviews) or rerun

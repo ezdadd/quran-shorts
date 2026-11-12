@@ -34,5 +34,6 @@ data/tuning.json
 data/sounds.json
 data/footage_checks.json
 data/gemini_usage.json
+data/buffer_limits.json
 data/corrections/
 data/sheikhs/
