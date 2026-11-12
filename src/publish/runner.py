@@ -107,16 +107,46 @@ def _texts(r: dict, platform: str) -> tuple[str, str]:
     return review.final_caption(r, platform, review.load()), title
 
 
+MANUAL_LABEL = {"tiktok": "🎵 تيك توك", "youtube": "▶️ يوتيوب شورتس", "instagram": "📸 إنستجرام ريلز"}
+
+
+def manual_post(cfg, r: dict, when: dict[str, datetime]) -> None:
+    """Buffer can't take posts (its request limit is used up): send you the video's download link
+    and, per platform, its time and caption (tap a grey block in Telegram to copy it)."""
+    from html import escape
+    from ..review import telegram
+    tz = ZoneInfo(cfg["timezone"])
+    url = r["hosting"]["url"].replace("/upload/", "/upload/fl_attachment/", 1)    # downloads, not plays
+    until = buffer.blocked_until()
+    head = (f"📲 Buffer واقف{f' لحد {datetime.fromtimestamp(until, tz):%Y-%m-%d}' if until else ''} — "
+            f"انشر الفيديو ده بنفسك\n🆔 {escape(r['id'])}\n\n"
+            f"⬇️ <a href=\"{escape(url)}\">نزّل الفيديو</a> (اللينك شغال ٣ أيام)\n")
+    parts = []
+    for pl, t in sorted(when.items(), key=lambda x: x[1]):
+        caption, title = _texts(r, pl)
+        block = f"\n{MANUAL_LABEL.get(pl, pl)} — الساعة {t.astimezone(tz):%H:%M}\n"
+        if pl == "youtube":
+            block += f"العنوان:\n<code>{escape(title or caption.split(chr(10))[0])}</code>\nالوصف:\n"
+        parts.append(block + f"<code>{escape(caption)}</code>\n")
+    telegram.api("sendMessage", chat_id=telegram.owner(), text=(head + "".join(parts))[:4000],
+                 parse_mode="HTML", disable_web_page_preview="true")
+
+
 def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     tz = ZoneInfo(cfg["timezone"])
     platforms = cfg["publishing"]["platforms"]
     errors: list[str] = []
     chans: dict = {}
     fb_ok = False
+    manual: list[str] = []      # Buffer's limit is used up: you post these yourself (manual_post)
     if not dry_run:
-        if buffer.configured():
+        if buffer.configured() and buffer.blocked_until():
+            manual = [pl for pl in platforms if pl != "facebook"]
+        elif buffer.configured():
             try:
                 chans = buffer.channels()
+            except buffer.BufferLimited:
+                manual = [pl for pl in platforms if pl != "facebook"]
             except Exception as e:
                 errors.append(f"Buffer: {e}")
         if facebook.configured():
@@ -139,11 +169,13 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
                         stamp.touch()
                         notify.send("⚠️ فيسبوك اتخطى في النشر: توكن الصفحة بطل يشتغل (الصلاحيات اتلغت). "
                                     "الفيديوهات بتتنشر على باقي المنصات. جدد التوكن (python tools/fb_token.py).")
+            elif pl in manual:
+                log.info(f"{pl}: Buffer limit used up — download link + caption sent to you instead")
             elif pl != "facebook" and pl not in chans:
                 log.info(f"{pl}: no connected Buffer channel — skipped")
         # only platforms that can actually take a post right now; the rest are retried on the
         # next day's videos, never back-filled onto old ones
-        platforms = [pl for pl in platforms if (fb_ok if pl == "facebook" else pl in chans)]
+        platforms = [pl for pl in platforms if (fb_ok if pl == "facebook" else pl in chans or pl in manual)]
 
     items = todays_items(cfg, day)
     # only videos with at least one available platform still unscheduled
@@ -210,7 +242,7 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             log.info("[dry-run] %s", line)
             continue
         log.info("scheduling %s", line)
-        need_host = any(pl != "facebook" and pl in chans and pl not in pub for pl in platforms)
+        need_host = any(pl != "facebook" and (pl in chans or pl in manual) and pl not in pub for pl in platforms)
         if need_host and not (r.get("hosting") or {}).get("url"):
             try:
                 r["hosting"] = hosting.upload(mp4, r["id"]) | {"deleted": False}
@@ -227,6 +259,10 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
                         continue
                     res = facebook.schedule_reel(cfg, mp4, caption, when[pl], title=title)
                     pub[pl] = {"status": "scheduled", "due": when[pl].isoformat(), **res}
+                elif pl in manual:
+                    if not (r.get("hosting") or {}).get("url"):
+                        continue
+                    pub[pl] = {"status": "manual", "due": when[pl].isoformat()}
                 else:
                     if pl not in chans or not (r.get("hosting") or {}).get("url"):
                         continue
@@ -238,6 +274,19 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             except Exception as e:
                 errors.append(f"{r['id']} {pl}: {e}")
             write_json(rec_path, r)     # save after every platform so a crash never re-posts
+        mine = {pl: when[pl] for pl in manual if (pub.get(pl) or {}).get("status") == "manual"
+                and not pub[pl].get("sent_to_you")}
+        if mine:
+            try:
+                manual_post(cfg, r, mine)
+                for pl in mine:
+                    pub[pl]["sent_to_you"] = True
+                write_json(rec_path, r)
+            except Exception as e:
+                for pl in mine:                 # not told: try again on the next run
+                    pub.pop(pl, None)
+                write_json(rec_path, r)
+                errors.append(f"{r['id']} manual post message: {e}")
         history.setdefault("published", {})[r["id"]] = pub
         write_json(hist_p, history)
     if errors:
