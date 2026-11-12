@@ -406,8 +406,10 @@ def _render_clip_once(cfg, rec: dict, tr: TextRenderer, attempt: int = 0) -> Pat
         lab.alpha_composite(bd, ((W - bd.width) // 2, 110))
     lab.save(lab_png)
 
-    inputs = args + ["-f", "concat", "-safe", "0", "-i", str(concat),
-                     "-loop", "1", "-t", f"{total:.3f}", "-i", str(lab_png)]
+    # the labels image as ONE frame (overlay keeps showing it to the end): looped with -loop 1, FFmpeg
+    # decoded it far ahead of the video and queued every 8 MB copy — a 3-minute shared clip took
+    # 9+ GB and the GitHub machine was shut down mid-render
+    inputs = args + ["-f", "concat", "-safe", "0", "-i", str(concat), "-i", str(lab_png)]
     txt_idx = 1 if is_video else 2
     lab_idx = txt_idx + 1
     fc.append(f"[{txt_idx}:v]fps={FPS},format=rgba[txt]")
