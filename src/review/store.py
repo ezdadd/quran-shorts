@@ -64,36 +64,27 @@ def is_approved(r: dict, reviews: dict) -> bool:
         (st is None and (r.get("auto") or {}).get("status") == "approved")
 
 
+def kind_of(r: dict) -> str:
+    return r["kind"] if r.get("kind") in ("hadith", "kids") else \
+        "clip" if r.get("kind") == "clip" or r.get("type") == "lecture" else "quran"
+
+
 def final_caption(r: dict, platform: str, reviews: dict) -> str:
-    """Stored caption, minus any footage credit line, with the reviewer's hashtags if edited."""
+    """Stored caption, minus any footage credit line and every hashtag it was made with; then only
+    your hashtags (captions.hashtags, e.g. #foryou #ازدد) and the one for its kind of content
+    (captions.kind_hashtag: Quran / hadith / sermon) — or, if you edited this video's hashtags in
+    Telegram, yours in place of the kind one. Applies to videos already waiting too."""
     p = r.get("platforms", {}).get(platform) or r["platforms"]["tiktok"]
     cap = CREDIT_LINE.sub("", p["caption"]).rstrip()
-    tags = get(r["id"], reviews).get("tags")
-    if tags is not None:
-        old = " ".join(p.get("hashtags") or [])
-        new = list(tags)
-        if platform == "youtube" and "#shorts" not in new:
-            new.append("#shorts")
-        cap = cap.replace(old, " ".join(new)) if old and old in cap else \
-            TAG.sub("", cap).rstrip() + "\n\n" + " ".join(new)
-    return with_fixed_tags(re.sub(r"\n{3,}", "\n\n", cap).strip(), platform)
-
-
-# hashtag caps per platform: YouTube ignores EVERY hashtag in a description with more than 15
-TAG_LIMIT = {"youtube": 15, "instagram": 30}
-
-
-def with_fixed_tags(cap: str, platform: str) -> str:
-    """The video's own hashtags first, then your fixed ones (captions.fixed_hashtags), de-duplicated
-    and cut to the platform's limit; all of them go on one line at the end."""
-    fixed = (load_config().get("captions") or {}).get("fixed_hashtags") or []
-    own = TAG.findall(cap)
-    seen, tags = set(), []
-    for t in (["#shorts"] if platform == "youtube" else []) + own + list(fixed):
+    c = load_config().get("captions") or {}
+    edited = get(r["id"], reviews).get("tags")
+    kind = (c.get("kind_hashtag") or {}).get(kind_of(r))
+    tags = list(c.get("hashtags") or []) + (list(edited) if edited is not None else [kind] if kind else [])
+    seen, out = set(), []
+    for t in tags:
         k = t.lstrip("#＃").lower()
         if k and k not in seen:
             seen.add(k)
-            tags.append("#" + t.lstrip("#＃"))
-    tags = tags[:TAG_LIMIT.get(platform, 60)]
+            out.append("#" + t.lstrip("#＃"))
     body = re.sub(r"[ \t]+\n", "\n", TAG.sub("", cap)).strip()
-    return re.sub(r"\n{3,}", "\n\n", f"{body}\n\n{' '.join(tags)}").strip()
+    return re.sub(r"\n{3,}", "\n\n", f"{body}\n\n{' '.join(out)}").strip()

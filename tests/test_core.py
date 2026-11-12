@@ -88,15 +88,16 @@ def test_subtitle_edits():
     assert r["segments"][0]["words"][0]["s"] == 0                  # same word count keeps timing
 
 
-def test_tags_and_youtube_limit(monkeypatch):
+def test_only_our_hashtags(monkeypatch):
     from src.review import store
-    monkeypatch.setattr(store, "load_config", lambda: {"captions": {"fixed_hashtags": [f"#t{i}" for i in 20 * [0]] and
-                                                                      [f"#t{i}" for i in range(20)]}})
-    r = {"id": "q-1", "platforms": {"youtube": {"caption": "عنوان\n\n#a #b", "hashtags": ["#a", "#b"]},
-                                    "tiktok": {"caption": "عنوان\n\n#a #b", "hashtags": ["#a", "#b"]}}}
-    yt = store.final_caption(r, "youtube", {})
-    assert len(store.TAG.findall(yt)) == 15 and "#shorts" in yt     # YouTube ignores all above 15
-    assert len(store.TAG.findall(store.final_caption(r, "tiktok", {}))) == 22
+    monkeypatch.setattr(store, "load_config", lambda: {"captions": {
+        "hashtags": ["#foryou", "#ازدد"], "kind_hashtag": {"quran": "#قرآن", "hadith": "#حديث", "clip": "#موعظة"}}})
+    caps = {"caption": "عنوان\n\n#a #b #shorts", "hashtags": ["#a", "#b"]}
+    q = {"id": "q-1", "platforms": {"youtube": caps, "tiktok": caps}}
+    assert store.final_caption(q, "youtube", {}) == "عنوان\n\n#foryou #ازدد #قرآن"   # the made ones are gone
+    c = {"id": "c-1", "kind": "clip", "platforms": {"tiktok": caps}}
+    assert store.final_caption(c, "tiktok", {}).endswith("#foryou #ازدد #موعظة")
+    assert store.final_caption(c, "tiktok", {"c-1": {"tags": ["#x"]}}).endswith("#foryou #ازدد #x")
 
 
 def test_approval_rules():

@@ -1152,7 +1152,9 @@ def poll(cfg) -> bool:
                     api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
                         text="مش لاقي الفيديو ده. رد على رسالة الفيديو نفسها.")
                     continue
-                cur = store.get(r["id"], reviews).get("tags") or r["platforms"]["tiktok"].get("hashtags", [])
+                kind = ((load_config().get("captions") or {}).get("kind_hashtag") or {}).get(store.kind_of(r))
+                cur = store.get(r["id"], reviews).get("tags")      # yours, or the kind one (#foryou #ازدد always stay)
+                cur = cur if cur is not None else [kind] if kind else []
                 new = store.edit_tags(cur, text)
                 reviews.setdefault(r["id"], {})["tags"] = new
                 api("sendMessage", chat_id=me, reply_to_message_id=msg["message_id"],
