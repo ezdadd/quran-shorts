@@ -222,7 +222,11 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     scheduled = 0
     for (rec_path, r), base in zip(items, times):
         mp4 = rec_path.with_suffix(".mp4")
-        if not dry_run:
+        # the file itself is only needed to upload it (Facebook, or not hosted yet): Buffer and the
+        # manual link use the hosted URL, and every fetch from Cloudinary eats its monthly bandwidth
+        need_file = (fb_ok and "facebook" in platforms and "facebook" not in (r.get("published") or {})) \
+            or not (r.get("hosting") or {}).get("url")
+        if not dry_run and need_file:
             try:
                 mp4 = video_file(rec_path, r)
             except Exception as e:
