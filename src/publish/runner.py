@@ -54,7 +54,6 @@ def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
     # approved items that needed a human review (lectures, aligned recordings) come from the
     # committed queue — they were made locally and are already hosted
     n_q = cfg["daily"].get("queue_per_day", 1)
-    platforms = cfg["publishing"]["platforms"]
     reviews = review.load()
     pending: list[tuple[Path, dict]] = []
     blocked: set[str] = set()       # a series whose next part is still waiting for review
@@ -68,7 +67,10 @@ def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
                              (x[1].get("series") or {}).get("part", 0)))
     for p, r in allq:
         sid = (r.get("series") or {}).get("id")
-        done = not any(pl not in (r.get("published") or {}) for pl in platforms)
+        # out on any platform = done: the others are never back-filled (publish_day). Counting only
+        # "on every platform" kept Facebook-only items (Buffer down) in the day's few slots forever,
+        # and nothing behind them went out for 10 days
+        done = bool(r.get("published"))
         if review.is_rejected(r, reviews) or done:
             continue
         if sid and sid in blocked:
