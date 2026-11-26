@@ -29,7 +29,7 @@ def load_passages(cfg) -> list[dict]:
         if p["from"] == 1 and p["surah"] != 1:
             # ayah 1 audio may or may not include the basmala depending on the reciter;
             # the text never does, so these are skipped to keep text == recitation
-            log.warning("skipping %s:%s — passages must not start at ayah 1", p["surah"], p["from"])
+            log.debug("skipping %s:%s — passages must not start at ayah 1", p["surah"], p["from"])
             continue
         out.append(p)
     return out

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import requests
@@ -118,13 +119,13 @@ def _gh_release(g: dict) -> dict:
     return r.json()
 
 
-def _gh_asset_ids(g: dict, rel: dict, name: str) -> list[int]:
+def _gh_asset_ids(g: dict, rel: dict, stem: str) -> list[int]:
     out, page = [], 1
     while True:
         r = requests.get(f"{GH_API}/repos/{g['repo']}/releases/{rel['id']}/assets", headers=g["h"],
                          params={"per_page": 100, "page": page}, timeout=30)
         r.raise_for_status()
-        out += [a["id"] for a in r.json() if a["name"] == name]
+        out += [a["id"] for a in r.json() if a["name"] == f"{stem}.mp4" or a["name"].startswith(f"{stem}.v")]
         if len(r.json()) < 100:
             return out
         page += 1
@@ -134,8 +135,11 @@ def _gh_asset_ids(g: dict, rel: dict, name: str) -> list[int]:
 def _gh_upload(path: Path, public_id: str) -> dict:
     g = _github()
     rel = _gh_release(g)
-    name = f"{public_id.replace('/', '_')}.mp4"
-    for aid in _gh_asset_ids(g, rel, name):          # same id again: replace it
+    stem = public_id.replace("/", "_")
+    # a new name on every upload: a re-made video (edited, re-rendered) never comes back as the old
+    # one from a cache on the way
+    name = f"{stem}.v{int(time.time())}.mp4"
+    for aid in _gh_asset_ids(g, rel, stem):          # same id again: replace it
         requests.delete(f"{GH_API}/repos/{g['repo']}/releases/assets/{aid}", headers=g["h"], timeout=30)
     up = rel["upload_url"].split("{")[0]
     with open(path, "rb") as f:
