@@ -18,6 +18,12 @@
 const MAKE_CRON = "7 */3 * * *";   // must match tools/deploy_worker.py
 const MENU_URL = (env) => `https://raw.githubusercontent.com/${env.REPO}/main/data/bot_menu.json`;
 const COUNTS = [1, 3, 5, 10];
+const STATS_AT = "06:30";          // Cairo time of the daily stats + health check (every-10-min cron)
+
+function cairoTime(ms) {
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", hour: "2-digit", minute: "2-digit",
+                                            hourCycle: "h23" }).format(new Date(ms));
+}
 
 // GET /v/<id>.mp4: a video kept as a GitHub release asset (MEDIA_REPO, tag "media"), passed through
 // with a video content type. Buffer fetches each post's video from here: GitHub's release downloads
@@ -55,6 +61,9 @@ export default {
   async scheduled(event, env, ctx) {
     // "7 */3 * * *": make the next Quran video(s) (daily.yml); every 10 min: the review poller
     ctx.waitUntil(event.cron === MAKE_CRON ? dispatch(env, null, "daily.yml") : dispatch(env, null));
+    // 06:30 Cairo (summer time too): the daily stats + health check, so its message is there when you
+    // wake up — GitHub's own schedule started it 40-60 min late
+    if (event.cron !== MAKE_CRON && cairoTime(event.scheduledTime) === STATS_AT) ctx.waitUntil(dispatch(env, null, "stats.yml"));
   },
 };
 

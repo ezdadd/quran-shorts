@@ -113,13 +113,19 @@ jobs:
       - name: Headless browser (Arabic text rendering)
         run: python -m playwright install --with-deps chromium
 
+      # one saved copy a week, not one per run: 8 runs a day x 263 MB filled GitHub's 10 GB cache and
+      # pushed the speech model (1.5 GB) out, so clip jobs downloaded it again every time
+      - name: Week (cache key)
+        id: week
+        run: echo "w=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
       - name: Restore Quran text / recitation cache
         uses: actions/cache@v4
         with:
           path: |
             .cache/api
             .cache/audio
-          key: quran-data-${{ github.run_id }}
+          key: quran-data-${{ steps.week.outputs.w }}
           restore-keys: quran-data-
 
       - name: Generate videos for today and the next days (tops up rejected ones too)

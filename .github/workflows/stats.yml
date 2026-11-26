@@ -4,8 +4,8 @@ name: performance-stats
 # Graph API) into data/stats.json. Saturdays: the weekly report in Telegram + gentle tuning of what
 # gets picked (data/tuning.json). /report in the bot shows the latest numbers any time.
 on:
-  schedule:
-    - cron: "20 4 * * *"
+  # started by the Cloudflare Worker at 06:30 Cairo every day (worker/bot.js STATS_AT): GitHub's own
+  # schedule ran it 40-60 min late
   workflow_dispatch:
     inputs:
       report:
