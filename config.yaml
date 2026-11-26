@@ -331,6 +331,7 @@ publishing:
   min_lead_minutes: 25           # أقل وقت بين الجدولة والنشر (فيسبوك محتاج 10+ دقايق)
   youtube_category: "27"         # Education
   delete_hosted_after_hours: 1   # يمسح الفيديو من Cloudinary بعد ما كل المنصات تأكد إنه اتنشر بالوقت ده (كل ساعة)
+  buffer_paused: true   # true = يوتيوب/تيك توك/إنستجرام يوصلوك لينك تنزيل + كابشن تنشرهم بإيدك بدل Buffer (رصيد Cloudinary)
   facebook_api_version: v26.0
   require_approval: true   # كل فيديو محتاج موافقة: منك، أو تلقائي بعد الفحص لو معملتش حاجة (تحت)
   # فيديوهات القرآن اليومية: لو معملتش حاجة خلال auto_approve_hours بتتفحص تلقائي (النص والمدة والملف)

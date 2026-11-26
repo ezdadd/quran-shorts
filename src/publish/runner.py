@@ -141,7 +141,7 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     fb_ok = False
     manual: list[str] = []      # Buffer's limit is used up: you post these yourself (manual_post)
     if not dry_run:
-        if buffer.configured() and buffer.blocked_until():
+        if buffer.configured() and (buffer.blocked_until() or cfg["publishing"].get("buffer_paused")):
             manual = [pl for pl in platforms if pl != "facebook"]
         elif buffer.configured():
             try:
