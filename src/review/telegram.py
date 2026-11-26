@@ -985,6 +985,12 @@ def poll(cfg) -> bool:
             if status == "rejected" and r:
                 gone = _unschedule(r)
                 note = f" (اتشال من: {', '.join(gone)})" if gone else ""
+            if status == "approved" and r and not r.get("published") and (r.get("hosting") or {}).get("deleted") \
+                    and not (path and path.with_suffix(".mp4").exists()):
+                # waited past the backlog days: its file was freed, so approving it can't publish it
+                api("sendMessage", chat_id=me, reply_to_message_id=cq["message"]["message_id"],
+                    text=f"⚠️ 🆔 {vid} قديم: ملفه اتمسح بعد ما فضل مستني أكتر من أسبوعين، فمش هيتنشر. "
+                         "لو عايزه، ابعت اللينك بتاعه تاني ويتعمل من جديد.")
             if status in ("approved", "rejected") and r.get("date", "") <= today:
                 rerun = True
             if status == "rejected":

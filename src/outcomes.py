@@ -60,8 +60,8 @@ def stuck(records: list[tuple[Path, dict]], reviews: dict, now: datetime) -> lis
     for _, r in records:
         if r.get("published") or not r.get("id") or store.is_rejected(r, reviews) or not store.is_approved(r, reviews):
             continue
-        if not (r.get("telegram") or {}).get("message_id"):
-            continue
+        if not (r.get("telegram") or {}).get("message_id") or (r.get("hosting") or {}).get("deleted"):
+            continue                    # never sent to you, or expired (its file freed; you're told on ✅)
         s = r.get("series") or {}
         if s.get("part", 1) > 1 and any(f"{r['id'].rsplit('-p', 1)[0]}-p{k:02d}" not in ok for k in range(1, s["part"])):
             continue
