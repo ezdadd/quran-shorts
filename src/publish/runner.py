@@ -224,8 +224,10 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
         mp4 = rec_path.with_suffix(".mp4")
         # the file itself is only needed to upload it (Facebook, or not hosted yet): Buffer and the
         # manual link use the hosted URL, and every fetch from Cloudinary eats its monthly bandwidth
+        # still on Cloudinary while GitHub hosting is on: moved first (fetched once, not 3 times by Buffer)
+        move = bool(chans) and hosting.on_cloudinary(r.get("hosting")) and hosting.github_ready()
         need_file = (fb_ok and "facebook" in platforms and "facebook" not in (r.get("published") or {})) \
-            or not (r.get("hosting") or {}).get("url")
+            or not (r.get("hosting") or {}).get("url") or move
         if not dry_run and need_file:
             try:
                 mp4 = video_file(rec_path, r)
@@ -249,10 +251,13 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
             continue
         log.info("scheduling %s", line)
         need_host = any(pl != "facebook" and (pl in chans or pl in manual) and pl not in pub for pl in platforms)
-        if need_host and not (r.get("hosting") or {}).get("url"):
+        if need_host and (move or not (r.get("hosting") or {}).get("url")):
             try:
+                old_h = r.get("hosting") or {}
                 r["hosting"] = hosting.upload(mp4, r["id"]) | {"deleted": False}
                 write_json(rec_path, r)
+                if move and old_h.get("public_id") and not hosting.on_cloudinary(r["hosting"]):
+                    hosting.delete(old_h["public_id"])          # its Cloudinary copy isn't needed now
             except Exception as e:
                 errors.append(f"{r['id']} hosting: {e}")
         for pl in platforms:

@@ -92,6 +92,15 @@ def _github() -> dict | None:
             "h": {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}}
 
 
+def github_ready() -> bool:
+    return _github() is not None
+
+
+def on_cloudinary(h: dict | None) -> bool:
+    h = h or {}
+    return bool(h.get("url")) and not h.get("deleted") and "res.cloudinary.com" in h["url"]
+
+
 def _gh_release(g: dict) -> dict:
     r = requests.get(f"{GH_API}/repos/{g['repo']}/releases/tags/{GH_TAG}", headers=g["h"], timeout=30)
     if r.status_code == 404:
