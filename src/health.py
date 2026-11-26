@@ -1,7 +1,7 @@
 """Keeps an eye on everything that runs without you.
 
     python -m src.health --watchdog     # hourly: any GitHub job that failed in the last hour -> Telegram
-    python -m src.health --check        # daily: Facebook token, Buffer channels, Cloudinary space, Gemini
+    python -m src.health --check        # daily: Facebook token, Buffer, Cloudinary, Gemini + outcomes.py
 
 Jobs that already send their own alert (daily videos, link clips, tests) are left out of the watchdog,
 so you never get the same failure twice. The daily check only writes when something needs you, and
@@ -93,6 +93,12 @@ def check(cfg) -> list[str]:
                          headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]})
         if r.status_code in (400, 401, 403):
             probs.append("Gemini: المفتاح مش شغال — المصحح وقراءة الأحاديث وفحص المشاهد هيقفوا. اعمل مفتاح جديد.")
+    # what should have come out yesterday, and what is stuck (jobs can "succeed" with nothing made)
+    try:
+        from . import outcomes
+        probs += outcomes.check(cfg)
+    except Exception as e:
+        probs.append(f"الفحص اليومي للنتايج نفسه وقع ({str(e)[:90]}).")
     if probs:
         _send("🩺 فحص يومي — محتاج منك:\n" + "\n".join(f"• {p}" for p in probs))
     else:

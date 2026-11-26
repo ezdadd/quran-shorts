@@ -499,3 +499,49 @@ def test_virtual_phone_scene_is_a_usable_screen(tmp_path, monkeypatch):
                                                                  "x": 0.6, "tilt": 0.04, "blur": 6}, tmp_path / "v.mp4")
     info = screens.survey(out)
     assert info["portrait"] and 0.4 < info["aspect"] < 0.55
+
+
+# ---------------------------------------------------------------- publishing queue + daily outcomes
+def _rec(root, rel, **r):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(r), encoding="utf-8")
+    return p
+
+
+def test_out_on_one_platform_never_holds_the_queue(tmp_path, monkeypatch):
+    """Facebook-only items (Buffer down) once took every daily slot: nothing behind them went out."""
+    from datetime import date
+    from src.publish import queue, runner
+    from src.review import store
+    from src.util import load_config
+    monkeypatch.setattr(runner, "OUTPUT", tmp_path / "output")
+    monkeypatch.setattr(queue, "QUEUE", tmp_path / "queue")
+    monkeypatch.setattr(store, "PATH", tmp_path / "reviews.json")
+    for i in range(5):
+        _rec(tmp_path, f"queue/c-old-{i}.json", id=f"c-old-{i}", kind="clip", type="lecture", queued_at=f"2026-11-0{i}",
+             published={"facebook": {"status": "scheduled", "due": "2026-11-01T10:00:00+02:00"}})
+    _rec(tmp_path, "queue/c-new.json", id="c-new", kind="clip", type="lecture", queued_at="2026-11-09")
+    (tmp_path / "reviews.json").write_text(json.dumps(
+        {f"c-{k}": {"status": "approved"} for k in ["new"] + [f"old-{i}" for i in range(5)]}), encoding="utf-8")
+    picked = [r["id"] for _, r in runner.todays_items(load_config(), date(2026, 11, 10))]
+    assert picked == ["c-new"]
+
+
+def test_daily_outcomes_flag_missing_quran_and_silent_platforms(tmp_path):
+    from datetime import date
+    from pathlib import Path
+    from src import outcomes
+    cfg = {"timezone": "Africa/Cairo", "daily": {"quran_count": 8},
+           "publishing": {"platforms": ["facebook", "youtube", "tiktok"]}}
+    due = "2026-11-21T18:00:00+02:00"
+    for i in range(3):
+        _rec(tmp_path, f"output/2026-11-21/q-{i}.json", id=f"q-{i}",
+             published={"facebook": {"status": "scheduled", "due": due}, "youtube": {"status": "manual", "due": due}})
+    _rec(tmp_path, "queue/c-1.json", id="c-1", kind="clip", telegram={"message_id": 5}, date="2026-11-18")
+    _rec(tmp_path, "data/reviews.json", **{"c-1": {"status": "approved", "at": "2026-11-18T10:00:00+00:00"}})
+    probs = "\n".join(outcomes.check(cfg, today=date(2026, 11, 22), root=Path(tmp_path)))
+    assert "اتعمل 3 من 8" in probs                  # Quran videos missing
+    assert "تيك توك: ولا بوست" in probs             # a platform with nothing
+    assert "يوتيوب: 3 فيديو" in probs               # waiting for you to post by hand
+    assert "c-1" in probs                           # approved days ago, never out

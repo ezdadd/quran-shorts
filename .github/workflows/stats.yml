@@ -28,6 +28,7 @@ jobs:
       PYTHONIOENCODING: utf-8
       BUFFER_API_KEY: ${{ secrets.BUFFER_API_KEY }}
       FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+      MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}     # the daily check counts the videos hosted on GitHub
       FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
       FB_APP_ID: ${{ secrets.FB_APP_ID }}
       FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
