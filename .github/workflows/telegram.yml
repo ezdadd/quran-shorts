@@ -32,6 +32,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       WORKER_URL: ${{ secrets.WORKER_URL }}     # instant bot (worker/bot.js); empty = poll Telegram
+      MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}
       WORKER_KEY: ${{ secrets.WORKER_KEY }}
       UPDATE_JSON: ${{ inputs.update }}
       AGENT_KEY_SET: ${{ secrets.GEMINI_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' }}

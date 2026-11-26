@@ -117,7 +117,8 @@ def manual_post(cfg, r: dict, when: dict[str, datetime]) -> None:
     from html import escape
     from ..review import telegram
     tz = ZoneInfo(cfg["timezone"])
-    url = r["hosting"]["url"].replace("/upload/", "/upload/fl_attachment/", 1)    # downloads, not plays
+    url = r["hosting"]["url"]                     # a link that downloads the file, not plays it
+    url = url + "?dl=1" if "/v/" in url else url.replace("/upload/", "/upload/fl_attachment/", 1)
     until = buffer.blocked_until()
     head = (f"📲 Buffer واقف{f' لحد {datetime.fromtimestamp(until, tz):%Y-%m-%d}' if until else ''} — "
             f"انشر الفيديو ده بنفسك\n🆔 {escape(r['id'])}\n\n"

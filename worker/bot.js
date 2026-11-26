@@ -8,7 +8,8 @@
 // The GitHub poller reads the stored updates from GET /updates and deletes them with POST /ack.
 //
 // Bindings: KV namespace UPDATES. Secrets: TG_TOKEN, TG_SECRET (webhook header), CHAT_ID,
-// WORKER_KEY (for /updates and /ack), GH_TOKEN (actions:write), REPO ("owner/name").
+// WORKER_KEY (for /updates and /ack), GH_TOKEN (actions:write), REPO ("owner/name"),
+// MEDIA_REPO (public repo whose "media" release holds videos waiting to be posted, see /v/).
 //
 // Control group (more people in control): add the bot to a Telegram group with them and make it
 // an admin there; the owner gets a "use this group" button privately. From then on the bot posts
@@ -18,10 +19,29 @@ const MAKE_CRON = "7 */3 * * *";   // must match tools/deploy_worker.py
 const MENU_URL = (env) => `https://raw.githubusercontent.com/${env.REPO}/main/data/bot_menu.json`;
 const COUNTS = [1, 3, 5, 10];
 
+// GET /v/<id>.mp4: a video kept as a GitHub release asset (MEDIA_REPO, tag "media"), passed through
+// with a video content type. Buffer fetches each post's video from here: GitHub's release downloads
+// have no bandwidth cap, Cloudinary's free plan does (Buffer fetches every video 3 times).
+async function media(req, env, url) {
+  const name = url.pathname.slice(3);
+  if (!/^[\w.-]+\.mp4$/.test(name)) return new Response("not found", { status: 404 });
+  const range = req.headers.get("range");
+  const r = await fetch(`https://github.com/${env.MEDIA_REPO}/releases/download/media/${name}`,
+                        { headers: range ? { range } : {}, redirect: "follow" });
+  if (r.status !== 200 && r.status !== 206) return new Response("not found", { status: 404 });
+  const h = new Headers({ "content-type": "video/mp4", "accept-ranges": "bytes", "cache-control": "public, max-age=3600" });
+  if (url.searchParams.has("dl")) h.set("content-disposition", `attachment; filename="${name}"`);   // your download link
+  for (const k of ["content-length", "content-range", "etag", "last-modified"]) {
+    if (r.headers.get(k)) h.set(k, r.headers.get(k));
+  }
+  return new Response(req.method === "HEAD" ? null : r.body, { status: r.status, headers: h });
+}
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     if (req.method === "POST" && url.pathname === "/tg") return telegram(req, env, ctx);
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/v/")) return media(req, env, url);
     if (url.pathname === "/updates" || url.pathname === "/ack" || url.pathname === "/config") {
       if (req.headers.get("x-worker-key") !== env.WORKER_KEY) return new Response("forbidden", { status: 403 });
       if (url.pathname === "/config")

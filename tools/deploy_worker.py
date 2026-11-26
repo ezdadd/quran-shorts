@@ -28,6 +28,7 @@ from src.util import load_config  # noqa: E402
 NAME = "ezdadd-bot"
 KV_TITLE = "ezdadd-bot-updates"
 REPO = "ezdadd/quran-shorts"
+MEDIA_REPO = "ezdadd/quran-shorts-media"     # public: its "media" release holds videos for Buffer (/v/)
 CF = "https://api.cloudflare.com/client/v4"
 GH = os.environ.get("GH_CLI", r"C:\Program Files\GitHub CLI\gh.exe")
 
@@ -83,6 +84,7 @@ def main() -> None:
     meta = {"main_module": "bot.js", "compatibility_date": "2026-10-01",
             "bindings": [{"type": "kv_namespace", "name": "UPDATES", "namespace_id": ns},
                          {"type": "plain_text", "name": "REPO", "text": REPO},
+                         {"type": "plain_text", "name": "MEDIA_REPO", "text": MEDIA_REPO},
                          {"type": "plain_text", "name": "CHAT_ID", "text": os.environ["TELEGRAM_CHAT_ID"].strip()},
                          {"type": "secret_text", "name": "TG_TOKEN", "text": os.environ["TELEGRAM_BOT_TOKEN"].strip()},
                          {"type": "secret_text", "name": "TG_SECRET", "text": tg_secret},

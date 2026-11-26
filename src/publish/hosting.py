@@ -63,8 +63,75 @@ def fit(path: Path) -> Path:
 
 
 def upload(path: Path, public_id: str) -> dict:
-    """Upload an MP4; returns {"url", "public_id", "bytes"}. Re-uploading the same id overwrites."""
+    """Upload an MP4; returns {"url", "public_id", "bytes"}. Re-uploading the same id overwrites.
+    On GitHub (publishing.hosting: github) when set up, else Cloudinary."""
+    if _github():
+        try:
+            return _gh_upload(path, public_id)
+        except Exception as e:                   # Cloudinary stays the fallback
+            log.warning("GitHub hosting failed (%s) — Cloudinary instead", e)
     return _upload(fit(path), public_id)
+
+
+# ---------------------------------------------------------------- GitHub release hosting
+# Free with no bandwidth cap: each video is an asset of the "media" release of a public repo, and
+# the Cloudflare Worker serves it as /v/<id>.mp4 with a video content type (worker/bot.js).
+# Cloudinary's free plan has a monthly cap, and Buffer fetches every video 3 times.
+GH_API = "https://api.github.com"
+GH_TAG = "media"
+
+
+def _github() -> dict | None:
+    from ..util import load_config
+    repo = (load_config().get("publishing") or {}).get("media_repo")
+    tok = os.environ.get("MEDIA_TOKEN") or os.environ.get("GH_TOKEN")
+    worker = (os.environ.get("WORKER_URL") or "").rstrip("/")
+    if (load_config().get("publishing") or {}).get("hosting") != "github" or not (repo and tok and worker):
+        return None
+    return {"repo": repo, "worker": worker,
+            "h": {"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"}}
+
+
+def _gh_release(g: dict) -> dict:
+    r = requests.get(f"{GH_API}/repos/{g['repo']}/releases/tags/{GH_TAG}", headers=g["h"], timeout=30)
+    if r.status_code == 404:
+        r = requests.post(f"{GH_API}/repos/{g['repo']}/releases", headers=g["h"], timeout=30,
+                          json={"tag_name": GH_TAG, "name": "videos waiting to be posted",
+                                "body": "Each video is removed once it has been posted."})
+    r.raise_for_status()
+    return r.json()
+
+
+def _gh_asset_ids(g: dict, rel: dict, name: str) -> list[int]:
+    out, page = [], 1
+    while True:
+        r = requests.get(f"{GH_API}/repos/{g['repo']}/releases/{rel['id']}/assets", headers=g["h"],
+                         params={"per_page": 100, "page": page}, timeout=30)
+        r.raise_for_status()
+        out += [a["id"] for a in r.json() if a["name"] == name]
+        if len(r.json()) < 100:
+            return out
+        page += 1
+
+
+@retry(wait=wait_exponential(min=3, max=40), stop=stop_after_attempt(3), reraise=True)
+def _gh_upload(path: Path, public_id: str) -> dict:
+    g = _github()
+    rel = _gh_release(g)
+    name = f"{public_id.replace('/', '_')}.mp4"
+    for aid in _gh_asset_ids(g, rel, name):          # same id again: replace it
+        requests.delete(f"{GH_API}/repos/{g['repo']}/releases/assets/{aid}", headers=g["h"], timeout=30)
+    up = rel["upload_url"].split("{")[0]
+    with open(path, "rb") as f:
+        r = requests.post(up, params={"name": name}, data=f, timeout=900,
+                          headers={**g["h"], "Content-Type": "video/mp4",
+                                   "Content-Length": str(path.stat().st_size)})
+    if r.status_code >= 400:
+        raise HostingError(f"GitHub upload {r.status_code}: {r.text[:300]}")
+    a = r.json()
+    url = f"{g['worker']}/v/{name}"
+    log.info("hosted %s -> %s (%.1f MB, GitHub)", path.name, url, a["size"] / 1e6)
+    return {"url": url, "public_id": f"gh:{a['id']}", "bytes": a["size"]}
 
 
 @retry(wait=wait_exponential(min=3, max=40), stop=stop_after_attempt(4), reraise=True)
@@ -91,6 +158,15 @@ def url_is_public(url: str) -> bool:
 
 @retry(wait=wait_exponential(min=3, max=40), stop=stop_after_attempt(4), reraise=True)
 def delete(public_id: str) -> bool:
+    if public_id.startswith("gh:"):
+        from ..util import load_config
+        repo = (load_config().get("publishing") or {}).get("media_repo")
+        tok = os.environ.get("MEDIA_TOKEN") or os.environ.get("GH_TOKEN")
+        r = requests.delete(f"{GH_API}/repos/{repo}/releases/assets/{public_id[3:]}", timeout=30,
+                            headers={"Authorization": f"Bearer {tok}", "Accept": "application/vnd.github+json"})
+        if r.status_code not in (204, 404):
+            raise HostingError(f"GitHub delete {r.status_code}: {r.text[:200]}")
+        return True
     cloud, auth = _creds()
     r = requests.post(f"https://api.cloudinary.com/v1_1/{cloud}/video/destroy", auth=auth,
                       data={"public_id": public_id, "invalidate": "true"}, timeout=60)

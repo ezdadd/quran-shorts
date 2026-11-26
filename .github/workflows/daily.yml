@@ -46,6 +46,8 @@ jobs:
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
       CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
       CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}     # videos for Buffer as GitHub release assets (hosting.py)
+      WORKER_URL: ${{ secrets.WORKER_URL }}
       FB_APP_ID: ${{ secrets.FB_APP_ID }}
       FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
       FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}

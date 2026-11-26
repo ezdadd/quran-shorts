@@ -26,6 +26,8 @@ jobs:
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
       CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
       CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+      MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}     # videos for Buffer as GitHub release assets (hosting.py)
+      WORKER_URL: ${{ secrets.WORKER_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
