@@ -34,7 +34,7 @@ log = logging.getLogger("quran-shorts.stats")
 PATH = ROOT / "data" / "stats.json"
 TUNING = ROOT / "data" / "tuning.json"
 COLLECT_DAYS = 14
-BUFFER_READS_AT = (3, 10)   # days after posting
+BUFFER_READS_AT = (4,)      # days after posting (once: ~3 posts a video, 100 requests a day in all)
 MIN_SAMPLES = 5
 PLATFORM_AR = {"youtube": "يوتيوب", "tiktok": "تيك توك", "instagram": "إنستجرام", "facebook": "فيسبوك"}
 KIND_AR = {"quran": "📖 قرآن", "hadith": "📜 حديث", "kids": "🧒 أطفال", "clip": "🎙 مقاطع"}
@@ -96,9 +96,13 @@ def _window_of(cfg, t: datetime) -> str | None:
 
 # ---------------------------------------------------------------- collecting
 def _buffer_metrics(post_id: str) -> dict | None:
+    """Its numbers once sent; {"_error": message} if Buffer couldn't post it (this read is the only
+    time we ask Buffer about a post); None while it isn't out yet."""
     from .publish import buffer
-    q = """query($id: PostId!) { post(input: {id: $id}) { status metrics { type value } } }"""
+    q = """query($id: PostId!) { post(input: {id: $id}) { status error { message } metrics { type value } } }"""
     d = buffer.gql(q, {"id": post_id})["post"]
+    if d["status"] == "error":
+        return {"_error": (d.get("error") or {}).get("message") or "?"}
     if d["status"] != "sent":
         return None
     return {m["type"]: m["value"] for m in d.get("metrics") or []}
@@ -129,6 +133,7 @@ def collect(cfg) -> int:
     data = read_json(PATH, {})
     now = datetime.now(timezone.utc)
     n = 0
+    failed = []
     for r in records():
         e = data.setdefault(r["id"], {})
         e["meta"] = meta(r, cfg)
@@ -148,12 +153,17 @@ def collect(cfg) -> int:
             except Exception as ex:
                 log.warning("%s %s: %s", r["id"], pl, ex)
                 continue
+            if m is not None and "_error" in m:
+                failed.append(f"{r['id']} {PLATFORM_AR.get(pl, pl)}: {m['_error'][:120]}")
             if m is not None:
                 e.setdefault("platforms", {})[pl] = m | {"at": now.isoformat(timespec="minutes")} | \
                     ({"reads": reads} if reads else {})
                 n += 1
         write_json(PATH, data)          # as it goes: a run cut short still keeps what it read
     write_json(PATH, data)
+    if failed:
+        from .publish import notify
+        notify.send("منشورات Buffer فشلت (ممكن تنشرها بإيدك):\n" + "\n".join(failed[:15]))
     log.info("collected %d post stats", n)
     return n
 

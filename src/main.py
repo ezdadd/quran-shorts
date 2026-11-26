@@ -19,6 +19,7 @@ from .util import ROOT, load_config, path, read_json, setup_logging, write_json
 
 log = logging.getLogger("quran-shorts.main")
 MAX_FAILURES = 4        # replacement attempts per run before giving up (and alerting)
+MIN_REPEAT_DAYS = 14    # a Quran passage never comes back sooner, even when the pool runs short
 
 
 def load_passages(cfg) -> list[dict]:
@@ -47,8 +48,24 @@ def generate_quran(cfg, n: int, run_date: date, rng: random.Random, history: dic
     out_dir.mkdir(parents=True, exist_ok=True)
     cutoff = (run_date - timedelta(days=cfg["quran"]["passage_cooldown_days"])).isoformat()
     recent = {k for k, d in history.setdefault("passages_used", {}).items() if d >= cutoff}
-    passages = [p for p in load_passages(cfg)
-                if f"{p['surah']}:{p['from']}-{p['to']}" not in recent]
+    allp = load_passages(cfg)
+    passages = [p for p in allp if f"{p['surah']}:{p['from']}-{p['to']}" not in recent]
+    if len(passages) < n and not force_passage:
+        # the pool is smaller than cooldown x videos a day (178 passages, 8 a day, 45 days): rather
+        # than no Quran video at all (6 silent days in Nov 2026), the ones used longest ago come back,
+        # never one from the last MIN_REPEAT_DAYS
+        floor = (run_date - timedelta(days=MIN_REPEAT_DAYS)).isoformat()
+        used = history["passages_used"]
+        old = sorted((p for p in allp if floor > used.get(f"{p['surah']}:{p['from']}-{p['to']}", "") >= cutoff),
+                     key=lambda p: used[f"{p['surah']}:{p['from']}-{p['to']}"])
+        log.warning("passage pool: %d unused in %d days — reusing up to %d used longest ago",
+                    len(passages), cfg["quran"]["passage_cooldown_days"], n - len(passages))
+        passages += old[:n - len(passages)]
+        if history.get("pool_alert") != run_date.isoformat():      # once a day
+            history["pool_alert"] = run_date.isoformat()
+            from .publish import notify
+            notify.send(f"📖 مقاطع القرآن ({len(allp)}) خلصت قبل فترة عدم التكرار ({cfg['quran']['passage_cooldown_days']} يوم) "
+                        f"— بستخدم الأقدم استخدامًا (مش أقل من {MIN_REPEAT_DAYS} يوم). زوّد مقاطع في data/passages.json.")
     # weighted random order (themes in quran.theme_weights come up more often); list is popped
     # from the end, so the most favoured keys sort last
     tw = cfg["quran"].get("theme_weights") or {}

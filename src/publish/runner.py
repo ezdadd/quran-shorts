@@ -34,7 +34,6 @@ def _ok_to_publish(r: dict, reviews: dict | None = None) -> bool:
 
 
 BACKLOG_DAYS = 14
-STATUS_EVERY = 6        # hours between two Buffer status checks of the same post
 
 
 def todays_items(cfg, day: date) -> list[tuple[Path, dict]]:
@@ -360,11 +359,9 @@ def status(cfg, video_id: str) -> None:
 
 
 def cleanup(cfg) -> None:
-    """Refresh Buffer post statuses; delete hosted files once every Buffer post is done (or its
-    due time is long past); alert on posts that failed."""
+    """Delete hosted files once every post has had its file (rejected / never approved ones too)."""
     hours = cfg["publishing"]["delete_hosted_after_hours"]
     now = datetime.now(ZoneInfo(cfg["timezone"]))
-    problems = []
     reviews = review.load()
     for p in list(OUTPUT.glob("*/q-*.json")) + list(queue.QUEUE.glob("*.json")):
         r = read_json(p, {})
@@ -381,39 +378,17 @@ def cleanup(cfg) -> None:
             except Exception as e:
                 log.warning("delete %s: %s", r["id"], e)
             continue
+        # no Buffer status checks here: Buffer allows ~100 requests a day for everything and each
+        # video's 3 posts take most of them; stats.py reads every post once (and reports failures)
         changed = False
-        for pl, info in pub.items():
-            if pl == "facebook" or info.get("status") in ("sent", "error") or not info.get("post_id"):
-                continue
-            if datetime.fromisoformat(info["due"]) > now:
-                continue
-            # Buffer requests are few (buffer.py): a post is asked about once it is due, then every
-            # STATUS_EVERY hours at most, and only from what scheduling posts leaves spare
-            if info.get("checked") and datetime.fromisoformat(info["checked"]) + \
-                    timedelta(hours=STATUS_EVERY) > now or not buffer.spare():
-                continue
-            try:
-                st = buffer.post_status(info["post_id"])
-            except Exception as e:
-                log.warning("status check %s %s: %s", r["id"], pl, e)
-                continue
-            info["checked"] = now.isoformat(timespec="minutes")
-            info["status"] = st["status"]
-            info["link"] = st.get("externalLink")
-            if st["status"] == "error":
-                problems.append(f"{r['id']} {pl}: {(st.get('error') or {}).get('message')}")
-            changed = True
-        h = r.get("hosting") or {}
+        h = h0
         if h.get("public_id") and not h.get("deleted") and pub:
-            # Buffer fetches the file from Cloudinary when it posts; Facebook got it uploaded directly.
-            # Free the space as soon as every Buffer post is confirmed sent (a failed one is kept a day
-            # in case it is retried); a Facebook-only video right after its time.
+            # Buffer fetches the file from Cloudinary at its time; Facebook got it uploaded directly;
+            # a "manual" one is your download link (kept 3 days). A day after each Buffer post's time
+            # it has long been fetched (a failed one is kept that long in case it is retried).
             buf = [i for pl, i in pub.items() if pl != "facebook"]
-            # (or, its status never confirmed, 3 days after its time: Buffer fetched the file long ago)
-            done = all(i.get("status") == "sent" or
-                       (i.get("status") == "error" and datetime.fromisoformat(i["due"]) + timedelta(hours=24) < now) or
-                       bool(i.get("due")) and datetime.fromisoformat(i["due"]) + timedelta(days=3) < now
-                       for i in buf)
+            done = all(bool(i.get("due")) and datetime.fromisoformat(i["due"]) +
+                       timedelta(days=3 if i.get("status") == "manual" else 1) < now for i in buf)
             last_due = max((datetime.fromisoformat(i["due"]) for i in pub.values() if i.get("due")), default=None)
             if done and last_due and last_due + timedelta(hours=hours) < now:
                 try:                        # its audio + final subtitles: training data, kept first
@@ -429,8 +404,6 @@ def cleanup(cfg) -> None:
                     log.warning("delete %s: %s", r["id"], e)
         if changed:
             write_json(p, r)
-    if problems:
-        notify.send("منشورات فشلت:\n" + "\n".join(problems))
 
 
 def main(argv=None):

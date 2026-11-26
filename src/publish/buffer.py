@@ -7,9 +7,10 @@ must stay reachable until the post publishes; Post.status in draft|error|needs_a
 scheduled|sending|sent.
 
 Request limits (read from its `ratelimit` headers, 2026-11): 150 per 15 min, 600 per 24 h and
-3,000 per 30 days for the whole key. The 30-day one is the one that bites: every request we make
-is counted here (data/buffer_limits.json), checks and stats only use what scheduling posts won't
-need (spare()), and once Buffer says "no more" nothing calls it again until its reset time.
+3,000 per 30 days for the whole key (100 a day). The 30-day one is the one that bites: every
+request we make is counted here (data/buffer_limits.json); scheduling posts comes first (~3 a
+video), stats read each post once and only from what that leaves (spare()); nothing else asks
+Buffer anything; and once Buffer says "no more" nothing calls it again until its reset time.
 """
 from __future__ import annotations
 
@@ -22,14 +23,12 @@ from datetime import datetime, timezone
 import requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from ..util import ROOT, read_json, write_json
+from ..util import ROOT, load_config, read_json, write_json
 
 log = logging.getLogger(__name__)
 API = "https://api.buffer.com"
 SERVICES = ("youtube", "tiktok", "instagram")
 LIMITS = ROOT / "data" / "buffer_limits.json"
-# requests a day kept for what must happen: ~10 videos x 3 channels scheduled + one status check each
-DAILY_ESSENTIAL = 65
 CHANNELS_TTL = 24 * 3600
 
 
@@ -62,6 +61,15 @@ def blocked_until() -> float:
     return t if t > time.time() else 0.0
 
 
+def daily_essential() -> int:
+    """Requests a day kept for scheduling posts: every video a day can bring x each Buffer channel
+    (+ a few for looking the channels up). The rest (stats) only uses what is left over."""
+    cfg = load_config()
+    d, p = cfg["daily"], cfg["publishing"]
+    videos = int(d.get("quran_count", 0)) + int(d.get("hadith_per_day", 0)) + int(d.get("queue_per_day", 0))
+    return videos * sum(1 for pl in p["platforms"] if pl != "facebook") + 5
+
+
 def spare(n: int = 1) -> bool:
     """True if `n` more requests for checks / stats still leave enough for scheduling posts until
     each window resets."""
@@ -70,9 +78,10 @@ def spare(n: int = 1) -> bool:
     now = time.time()
     w = read_json(LIMITS, {}).get("windows") or {}
     m, d = w.get("30d"), w.get("24h")
-    if m and m["reset"] > now and m["left"] - n < DAILY_ESSENTIAL * (m["reset"] - now) / 86400:
+    need = daily_essential()
+    if m and m["reset"] > now and m["left"] - n < need * (m["reset"] - now) / 86400:
         return False
-    if d and d["reset"] > now and d["left"] - n < DAILY_ESSENTIAL:
+    if d and d["reset"] > now and d["left"] - n < need:
         return False
     return True
 
