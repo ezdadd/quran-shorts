@@ -30,19 +30,20 @@ PL_AR = {"facebook": "فيسبوك", "youtube": "يوتيوب", "tiktok": "تي�
 
 
 def _records(root: Path) -> list[tuple[Path, dict]]:
-    out = []
-    for p in list((root / "output").glob("2*/*.json")) + list((root / "queue").glob("*.json")):
-        out.append((p, read_json(p, {})))
+    """Each video once: its queue copy (where publishing writes) over its older output/review copy."""
+    seen, out = set(), []
+    for p in list((root / "queue").glob("*.json")) + list((root / "output").glob("*/*.json")):
+        r = read_json(p, {})
+        if r.get("id") and r["id"] not in seen and p.parent.name != "visual_test":
+            seen.add(r["id"])
+            out.append((p, r))
     return out
 
 
 def posted_on(records: list[tuple[Path, dict]], day: date, tz) -> dict[str, Counter]:
     """platform -> Counter(status) of the posts whose time fell on `day` (local)."""
-    seen, out = set(), {}
+    out = {}
     for _, r in records:
-        if r.get("id") in seen:          # a queue item and its output copy
-            continue
-        seen.add(r.get("id"))
         for pl, i in (r.get("published") or {}).items():
             if i.get("due") and datetime.fromisoformat(i["due"]).astimezone(tz).date() == day:
                 out.setdefault(pl, Counter())[i.get("status") or "?"] += 1

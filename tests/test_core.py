@@ -545,3 +545,13 @@ def test_daily_outcomes_flag_missing_quran_and_silent_platforms(tmp_path):
     assert "تيك توك: ولا بوست" in probs             # a platform with nothing
     assert "يوتيوب: 3 فيديو" in probs               # waiting for you to post by hand
     assert "c-1" in probs                           # approved days ago, never out
+
+
+def test_reject_sees_the_queue_copy_with_its_posts(tmp_path, monkeypatch):
+    """Rejecting a scheduled clip read the older output/review copy (no posts): nothing was unscheduled."""
+    from src.review import telegram as tg
+    monkeypatch.setattr(tg, "ROOT", tmp_path)
+    monkeypatch.setattr(tg, "OUTPUT", tmp_path / "output")
+    _rec(tmp_path, "output/review/c-1.json", id="c-1")
+    _rec(tmp_path, "queue/c-1.json", id="c-1", published={"facebook": {"status": "scheduled", "video_id": "9"}})
+    assert tg._record("c-1")[1].get("published")

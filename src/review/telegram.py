@@ -358,7 +358,9 @@ def _kb(video_id: str, status: str | None) -> str:
 
 
 def _record(video_id: str) -> tuple[Path | None, dict]:
-    for p in list(OUTPUT.glob(f"*/{video_id}.json")) + list((ROOT / "queue").glob(f"{video_id}.json")):
+    # the queue copy first: publishing writes its posts there (output/review keeps an older copy), and
+    # rejecting a scheduled clip must see them to take it off Facebook / Buffer
+    for p in list((ROOT / "queue").glob(f"{video_id}.json")) + list(OUTPUT.glob(f"*/{video_id}.json")):
         if p.parent.name != "visual_test":
             return p, read_json(p, {})
     return None, {}
