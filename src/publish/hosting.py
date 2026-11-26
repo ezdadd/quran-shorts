@@ -95,9 +95,16 @@ def _github() -> dict | None:
 def _gh_release(g: dict) -> dict:
     r = requests.get(f"{GH_API}/repos/{g['repo']}/releases/tags/{GH_TAG}", headers=g["h"], timeout=30)
     if r.status_code == 404:
-        r = requests.post(f"{GH_API}/repos/{g['repo']}/releases", headers=g["h"], timeout=30,
-                          json={"tag_name": GH_TAG, "name": "videos waiting to be posted",
-                                "body": "Each video is removed once it has been posted."})
+        new = {"tag_name": GH_TAG, "name": "videos waiting to be posted",
+               "body": "Each video is removed once it has been posted."}
+        r = requests.post(f"{GH_API}/repos/{g['repo']}/releases", headers=g["h"], timeout=30, json=new)
+        if r.status_code == 422 and "empty" in r.text.lower():     # a release needs one commit first
+            import base64
+            text = "Videos of the ازدد channel waiting to be posted; each is removed once it is out.\n"
+            requests.put(f"{GH_API}/repos/{g['repo']}/contents/README.md", headers=g["h"], timeout=30,
+                         json={"message": "README", "content": base64.b64encode(text.encode()).decode()}
+                         ).raise_for_status()
+            r = requests.post(f"{GH_API}/repos/{g['repo']}/releases", headers=g["h"], timeout=30, json=new)
     r.raise_for_status()
     return r.json()
 
