@@ -134,6 +134,21 @@ def manual_post(cfg, r: dict, when: dict[str, datetime]) -> None:
                  parse_mode="HTML", disable_web_page_preview="true")
 
 
+def _posts_per_day(tz) -> dict[tuple[str, date], int]:
+    """(platform, local day) -> posts already scheduled or sent (each video once: queue copy first)."""
+    seen, out = set(), {}
+    for p in list(queue.QUEUE.glob("*.json")) + list(OUTPUT.glob("*/*.json")):
+        r = read_json(p, {})
+        if not r.get("id") or r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        for pl, i in (r.get("published") or {}).items():
+            if i.get("post_id") and i.get("due") and i.get("status") not in ("error", "skipped"):
+                k = (pl, datetime.fromisoformat(i["due"]).astimezone(tz).date())
+                out[k] = out.get(k, 0) + 1
+    return out
+
+
 def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     tz = ZoneInfo(cfg["timezone"])
     platforms = cfg["publishing"]["platforms"]
@@ -220,6 +235,8 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
     hist_p = path(cfg, "history")
     history = read_json(hist_p, {})
     scheduled = 0
+    caps = cfg["publishing"].get("daily_limits") or {}
+    used = _posts_per_day(tz) if caps else {}
     for (rec_path, r), base in zip(items, times):
         mp4 = rec_path.with_suffix(".mp4")
         # the file itself is only needed to upload it (Facebook, or not hosted yet): Buffer and the
@@ -277,13 +294,27 @@ def publish_day(cfg, day: date, dry_run: bool, rng: random.Random) -> dict:
                 else:
                     if pl not in chans or not (r.get("hosting") or {}).get("url"):
                         continue
+                    d = when[pl].astimezone(tz).date()
+                    if pl in caps and used.get((pl, d), 0) >= int(caps[pl]):
+                        # the channel's own daily maximum (YouTube via Buffer: 2): marked, so it is
+                        # never tried again — each refused try cost a request and an alert
+                        pub[pl] = {"status": "skipped", "reason": f"{pl} daily limit {caps[pl]}",
+                                   "due": when[pl].isoformat()}
+                        log.info("%s %s: %s already has %s posts that day — skipped", r["id"], pl, d, caps[pl])
+                        write_json(rec_path, r)
+                        continue
                     post = buffer.schedule_video(chans[pl], r["hosting"]["url"], caption, when[pl],
                                                  title=title,
                                                  youtube_category=cfg["publishing"]["youtube_category"])
                     pub[pl] = {"status": post["status"], "due": when[pl].isoformat(), "post_id": post["id"]}
+                    used[(pl, d)] = used.get((pl, d), 0) + 1
                 scheduled += 1
             except Exception as e:
-                errors.append(f"{r['id']} {pl}: {e}")
+                if "maximum number of posts" in str(e):     # Buffer's count disagrees with ours: same as above
+                    pub[pl] = {"status": "skipped", "reason": str(e)[:120], "due": when[pl].isoformat()}
+                    log.info("%s %s: daily maximum reached — skipped", r["id"], pl)
+                else:
+                    errors.append(f"{r['id']} {pl}: {e}")
             write_json(rec_path, r)     # save after every platform so a crash never re-posts
         mine = {pl: when[pl] for pl in manual if (pub.get(pl) or {}).get("status") == "manual"
                 and not pub[pl].get("sent_to_you")}

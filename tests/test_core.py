@@ -555,3 +555,19 @@ def test_reject_sees_the_queue_copy_with_its_posts(tmp_path, monkeypatch):
     _rec(tmp_path, "output/review/c-1.json", id="c-1")
     _rec(tmp_path, "queue/c-1.json", id="c-1", published={"facebook": {"status": "scheduled", "video_id": "9"}})
     assert tg._record("c-1")[1].get("published")
+
+
+def test_youtube_daily_limit_counts_each_video_once(tmp_path, monkeypatch):
+    """Buffer lets YouTube take 2 posts a day; extra tries were refused, cost requests and alerted."""
+    from datetime import date
+    from zoneinfo import ZoneInfo
+    from src.publish import queue, runner
+    monkeypatch.setattr(runner, "OUTPUT", tmp_path / "output")
+    monkeypatch.setattr(queue, "QUEUE", tmp_path / "queue")
+    yt = {"youtube": {"status": "scheduled", "post_id": "p", "due": "2026-11-28T21:00:00+02:00"}}
+    _rec(tmp_path, "queue/c-1.json", id="c-1", published=yt)
+    _rec(tmp_path, "output/review/c-1.json", id="c-1", published=yt)          # same video, older copy
+    _rec(tmp_path, "output/2026-11-28/q-1.json", id="q-1", published=yt)
+    _rec(tmp_path, "output/2026-11-28/q-2.json", id="q-2",
+         published={"youtube": {"status": "skipped", "due": "2026-11-28T22:00:00+02:00"}})
+    assert runner._posts_per_day(ZoneInfo("Africa/Cairo")) == {("youtube", date(2026, 11, 28)): 2}

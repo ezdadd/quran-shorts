@@ -88,7 +88,7 @@ def check(cfg, today: date | None = None, root: Path = ROOT) -> list[str]:
     p = cfg["publishing"]
     for pl in p["platforms"]:
         c = posts.get(pl, Counter())
-        real = sum(v for k, v in c.items() if k != "manual")
+        real = sum(v for k, v in c.items() if k not in ("manual", "skipped", "error"))
         if c.get("manual"):
             probs.append(f"{PL_AR.get(pl, pl)}: {c['manual']} فيديو امبارح مستنيين تنشرهم بإيدك (لينكات التنزيل).")
         elif real == 0:

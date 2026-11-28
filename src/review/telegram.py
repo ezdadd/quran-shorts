@@ -16,6 +16,7 @@ import argparse
 import logging
 import os
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -325,8 +326,22 @@ def sync_control_chat(state: dict) -> None:
 
 
 def api(method: str, files=None, http_timeout=60, **params):
-    r = requests.post(f"https://api.telegram.org/bot{_token()}/{method}", data=params, files=files,
-                      timeout=http_timeout)
+    # a dropped connection is tried twice more: once it crashed a whole run (Nov 27) and you got a
+    # "job failed" alert for nothing
+    for attempt in range(3):
+        try:
+            r = requests.post(f"https://api.telegram.org/bot{_token()}/{method}", data=params, files=files,
+                              timeout=http_timeout)
+            break
+        except (requests.ConnectionError, requests.Timeout) as e:
+            if attempt == 2:
+                raise TelegramError(f"{method}: {e}") from e
+            log.warning("telegram %s: %s — trying again", method, e)
+            for v in (files or {}).values():       # the upload starts over from the first byte
+                fh = v[1] if isinstance(v, tuple) else v
+                if hasattr(fh, "seek"):
+                    fh.seek(0)
+            time.sleep(5 * (attempt + 1))
     body = r.json()
     if not body.get("ok"):
         raise TelegramError(f"{method}: {body.get('description')}")
@@ -614,10 +629,14 @@ def send(cfg) -> int:
             except Exception as e:
                 log.warning("%s: cannot send (%s)", r["id"], e)
                 continue
-            with open(mp4, "rb") as f:
-                msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
-                          chat_id=owner(), caption=_caption(r, reviews), supports_streaming="true",
-                          width=1080, height=1920, reply_markup=_kb(r["id"], None))
+            try:
+                with open(mp4, "rb") as f:
+                    msg = api("sendVideo", files={"video": (mp4.name, f, "video/mp4")}, http_timeout=300,
+                              chat_id=owner(), caption=_caption(r, reviews), supports_streaming="true",
+                              width=1080, height=1920, reply_markup=_kb(r["id"], None))
+            except TelegramError as e:          # the next run sends it (it has no message yet)
+                log.warning("%s: not sent (%s)", r["id"], e)
+                continue
             r["telegram"] = {"message_id": msg["message_id"], "chat_id": owner(),
                              "sent_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
             write_json(p, r)
